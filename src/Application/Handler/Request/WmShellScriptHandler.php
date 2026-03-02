@@ -16,7 +16,7 @@ final class WmShellScriptHandler implements HandlerInterface
 {
     public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
     {
-        $baseDir = dirname(__DIR__, 3);
+        $baseDir = dirname(__DIR__, 4); // Request -> Handler -> Application -> src -> package root
         $path = $baseDir . '/resources/js/wm-shell.js';
         if (!is_file($path)) {
             return Response::text('/* WM shell not found */', 404);

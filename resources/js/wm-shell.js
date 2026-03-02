@@ -163,6 +163,39 @@
         }
     });
 
+    function renderDesktopIcons() {
+        var area = document.getElementById('wm-desktop-icons');
+        if (!area) return;
+        area.innerHTML = '';
+        apps.forEach(function (app) {
+            var btn = document.createElement('button');
+            btn.className = 'wm-desktop-icon';
+            btn.type = 'button';
+            var symbol = document.createElement('span');
+            symbol.className = 'wm-desktop-icon__symbol';
+            if (app.icon && (app.icon.indexOf('http') === 0 || app.icon.indexOf('data:') === 0)) {
+                var img = document.createElement('img');
+                img.src = app.icon;
+                img.alt = app.title;
+                img.style.width = '40px';
+                img.style.height = '40px';
+                img.style.objectFit = 'contain';
+                symbol.appendChild(img);
+            } else if (app.icon) {
+                symbol.textContent = app.icon;
+            } else {
+                symbol.textContent = (app.title || '?').charAt(0).toUpperCase();
+            }
+            var label = document.createElement('span');
+            label.className = 'wm-desktop-icon__label';
+            label.textContent = app.title || app.id;
+            btn.appendChild(symbol);
+            btn.appendChild(label);
+            btn.onclick = function () { openWindow(app.id, {}); };
+            area.appendChild(btn);
+        });
+    }
+
     function renderAppBar() {
         var bar = document.getElementById('wm-app-bar');
         if (!bar) return;
@@ -198,6 +231,7 @@
         bar.appendChild(logoutBtn);
     }
 
+    renderDesktopIcons();
     renderWindows();
     renderAppBar();
     window.__WM_OPEN__ = openWindow;
