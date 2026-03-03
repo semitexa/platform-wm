@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Application\Handler\Request;
+namespace Semitexa\Platform\Wm\Application\Event\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Contract\HandlerInterface;
@@ -16,7 +16,7 @@ final class WmShellScriptHandler implements HandlerInterface
 {
     public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
     {
-        $baseDir = dirname(__DIR__, 4); // Request -> Handler -> Application -> src -> package root
+        $baseDir = dirname(__DIR__, 4); // PayloadHandler -> Event -> Application -> src -> package root
         $path = $baseDir . '/resources/js/wm-shell.js';
         if (!is_file($path)) {
             return Response::text('/* WM shell not found */', 404);

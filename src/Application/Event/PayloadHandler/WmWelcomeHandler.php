@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Application\Handler\Request;
+namespace Semitexa\Platform\Wm\Application\Event\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Contract\HandlerInterface;
