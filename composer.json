@@ -25,5 +25,5 @@
             "description": "Window Manager: desktop, app registry, window state, SSE events"
         }
     },
-    "version": "0.0.6"
+    "version": "0.0.7"
 }

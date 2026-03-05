@@ -15,7 +15,7 @@ export class DesktopIcons {
     render(apps) {
         this._container.innerHTML = '';
 
-        for (const app of apps) {
+        for (const app of apps.filter(a => a.desktop !== false)) {
             const btn = document.createElement('button');
             btn.className = 'wm-desktop-icon';
             btn.type = 'button';

@@ -43,6 +43,7 @@ final class WmAppRegistry
                     entryUrl: $attr->entryUrl,
                     icon: $attr->icon,
                     permission: $attr->permission,
+                    desktop: $attr->desktop,
                 );
             } catch (\Throwable) {
                 continue;

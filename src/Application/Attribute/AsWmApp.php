@@ -20,6 +20,7 @@ final readonly class AsWmApp
         public string $entryUrl,
         public ?string $icon = null,
         public ?string $permission = null,
+        public bool $desktop = true,
     ) {
     }
 }

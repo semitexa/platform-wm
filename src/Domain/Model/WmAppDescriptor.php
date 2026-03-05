@@ -15,6 +15,7 @@ final readonly class WmAppDescriptor
         public string $entryUrl,
         public ?string $icon = null,
         public ?string $permission = null,
+        public bool $desktop = true,
     ) {
     }
 
@@ -27,6 +28,7 @@ final readonly class WmAppDescriptor
             'entryUrl' => $this->entryUrl,
             'icon' => $this->icon,
             'permission' => $this->permission,
+            'desktop' => $this->desktop,
         ];
     }
 }
