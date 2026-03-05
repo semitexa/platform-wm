@@ -15,6 +15,11 @@ use Semitexa\Platform\Wm\Application\Registry\WmAppRegistry;
  */
 final class WmStateService implements WmStateServiceInterface
 {
+    private const VALID_STATES = ['normal', 'minimized', 'maximized'];
+    private const UPDATABLE_KEYS = ['bounds', 'state', 'order', 'title', 'groupId'];
+    private const MIN_WIDTH = 200;
+    private const MIN_HEIGHT = 120;
+
     public function __construct(
         private readonly SessionInterface $session,
     ) {
@@ -26,12 +31,37 @@ final class WmStateService implements WmStateServiceInterface
     }
 
     /**
-     * @return list<array{id: string, appId: string, context: array<string, mixed>, title: string, order: int}>
+     * @return list<array<string, mixed>>
      */
     public function getWindows(): array
     {
         $payload = $this->session->getPayload(WmStateSessionPayload::class);
-        return $payload->getWindows();
+        $windows = $payload->getWindows();
+
+        // Normalize old windows missing new fields
+        $changed = false;
+        foreach ($windows as $i => $w) {
+            if (!isset($w['bounds'])) {
+                $offset = $i * 30;
+                $windows[$i]['bounds'] = ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 400, 'h' => 300];
+                $changed = true;
+            }
+            if (!isset($w['state'])) {
+                $windows[$i]['state'] = 'normal';
+                $changed = true;
+            }
+            if (!array_key_exists('groupId', $w)) {
+                $windows[$i]['groupId'] = null;
+                $changed = true;
+            }
+        }
+
+        if ($changed) {
+            $payload->setWindows($windows);
+            $this->session->setPayload($payload);
+        }
+
+        return $windows;
     }
 
     public function addWindow(string $appId, array $context = []): array
@@ -42,17 +72,58 @@ final class WmStateService implements WmStateServiceInterface
         $app = WmAppRegistry::get($appId);
         $title = $app !== null ? $app->title : $appId;
         $id = 'wm_' . bin2hex(random_bytes(8));
+        $offset = count($windows) * 30;
         $window = [
             'id' => $id,
             'appId' => $appId,
             'context' => $context,
             'title' => $title,
             'order' => $order,
+            'bounds' => ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 400, 'h' => 300],
+            'state' => 'normal',
+            'groupId' => null,
         ];
         $windows[] = $window;
         $payload->setWindows($windows);
         $this->session->setPayload($payload);
         return $window;
+    }
+
+    /**
+     * Validate update keys and values before applying.
+     * Returns null if valid, or an error message string.
+     */
+    public function validateUpdates(array $updates): ?string
+    {
+        foreach (array_keys($updates) as $key) {
+            if (!in_array($key, self::UPDATABLE_KEYS, true)) {
+                return "Invalid update key: $key";
+            }
+        }
+
+        if (isset($updates['bounds'])) {
+            $b = $updates['bounds'];
+            if (!is_array($b)) {
+                return 'bounds must be an object';
+            }
+            foreach (['x', 'y', 'w', 'h'] as $k) {
+                if (isset($b[$k]) && !is_numeric($b[$k])) {
+                    return "bounds.$k must be numeric";
+                }
+            }
+            if (isset($b['w']) && $b['w'] < self::MIN_WIDTH) {
+                return 'bounds.w minimum is ' . self::MIN_WIDTH;
+            }
+            if (isset($b['h']) && $b['h'] < self::MIN_HEIGHT) {
+                return 'bounds.h minimum is ' . self::MIN_HEIGHT;
+            }
+        }
+
+        if (isset($updates['state']) && !in_array($updates['state'], self::VALID_STATES, true)) {
+            return 'state must be one of: ' . implode(', ', self::VALID_STATES);
+        }
+
+        return null;
     }
 
     public function updateWindow(string $id, array $updates): ?array
@@ -61,6 +132,10 @@ final class WmStateService implements WmStateServiceInterface
         $windows = $payload->getWindows();
         foreach ($windows as $i => $w) {
             if (($w['id'] ?? '') === $id) {
+                // Merge bounds deeply so partial updates work
+                if (isset($updates['bounds']) && isset($w['bounds'])) {
+                    $updates['bounds'] = array_merge($w['bounds'], $updates['bounds']);
+                }
                 $windows[$i] = array_merge($w, $updates);
                 $payload->setWindows($windows);
                 $this->session->setPayload($payload);
@@ -94,5 +169,82 @@ final class WmStateService implements WmStateServiceInterface
             }
         }
         return null;
+    }
+
+    /**
+     * Group multiple windows together. All grouped windows share the first window's bounds.
+     *
+     * @param list<string> $windowIds
+     * @return string The generated groupId
+     */
+    public function groupWindows(array $windowIds): string
+    {
+        $payload = $this->session->getPayload(WmStateSessionPayload::class);
+        $windows = $payload->getWindows();
+        $groupId = 'grp_' . bin2hex(random_bytes(6));
+        $firstBounds = null;
+        $groupOrder = 0;
+
+        foreach ($windows as $i => $w) {
+            if (in_array($w['id'] ?? '', $windowIds, true)) {
+                if ($firstBounds === null) {
+                    $firstBounds = $w['bounds'] ?? ['x' => 50, 'y' => 50, 'w' => 400, 'h' => 300];
+                }
+                $windows[$i]['groupId'] = $groupId;
+                $windows[$i]['groupOrder'] = $groupOrder++;
+                $windows[$i]['bounds'] = $firstBounds;
+            }
+        }
+
+        $payload->setWindows($windows);
+        $this->session->setPayload($payload);
+        return $groupId;
+    }
+
+    /**
+     * Remove a window from its group. If < 2 windows remain, dissolve the group.
+     *
+     * @return array|null The ungrouped window data, or null if not found
+     */
+    public function ungroupWindow(string $id): ?array
+    {
+        $payload = $this->session->getPayload(WmStateSessionPayload::class);
+        $windows = $payload->getWindows();
+        $ungrouped = null;
+        $groupId = null;
+
+        foreach ($windows as $i => $w) {
+            if (($w['id'] ?? '') === $id) {
+                $groupId = $w['groupId'] ?? null;
+                $windows[$i]['groupId'] = null;
+                unset($windows[$i]['groupOrder']);
+                $ungrouped = $windows[$i];
+                break;
+            }
+        }
+
+        if ($ungrouped === null || $groupId === null) {
+            return $ungrouped;
+        }
+
+        // Count remaining members
+        $remaining = [];
+        foreach ($windows as $i => $w) {
+            if (($w['groupId'] ?? null) === $groupId) {
+                $remaining[] = $i;
+            }
+        }
+
+        // Dissolve group if fewer than 2 remain
+        if (count($remaining) < 2) {
+            foreach ($remaining as $i) {
+                $windows[$i]['groupId'] = null;
+                unset($windows[$i]['groupOrder']);
+            }
+        }
+
+        $payload->setWindows($windows);
+        $this->session->setPayload($payload);
+        return $ungrouped;
     }
 }

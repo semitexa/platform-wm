@@ -44,4 +44,19 @@ final class WmEventBus
     {
         self::dispatch($sessionId, 'window.focus', $window);
     }
+
+    public static function windowUpdate(string $sessionId, array $window): void
+    {
+        self::dispatch($sessionId, 'window.update', $window);
+    }
+
+    public static function windowGroup(string $sessionId, string $groupId, array $windowIds): void
+    {
+        self::dispatch($sessionId, 'window.group', ['groupId' => $groupId, 'windowIds' => $windowIds]);
+    }
+
+    public static function windowUngroup(string $sessionId, string $windowId, ?string $dissolvedGroupId = null): void
+    {
+        self::dispatch($sessionId, 'window.ungroup', ['windowId' => $windowId, 'dissolvedGroupId' => $dissolvedGroupId]);
+    }
 }

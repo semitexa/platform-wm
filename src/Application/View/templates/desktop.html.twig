@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semitexa Platform</title>
+    <link rel="stylesheet" href="/assets/platform-wm/css/wm-shell.css">
+    <link rel="modulepreload" href="/assets/platform-wm/js/wm-app.js">
+    <link rel="modulepreload" href="/assets/platform-wm/js/modules/api-client.js">
+    <link rel="modulepreload" href="/assets/platform-wm/js/modules/window-frame.js">
+    <link rel="modulepreload" href="/assets/platform-wm/js/modules/stack-manager.js">
+</head>
+<body>
+    <div id="wm-desktop">
+        <div id="wm-desktop-icons"></div>
+        <div id="wm-windows"></div>
+        <div id="wm-app-bar">
+            <div id="wm-app-launcher"></div>
+            <div id="wm-taskbar"></div>
+            <div id="wm-app-bar-right"></div>
+        </div>
+    </div>
+    <script>
+        window.__WM_BOOTSTRAP__ = {{ wmBootstrap|json_encode|raw }};
+    </script>
+    <script src="/assets/platform-wm/js/wm-shell.js"></script>
+</body>
+</html>
