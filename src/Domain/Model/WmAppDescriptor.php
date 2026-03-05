@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\App;
+namespace Semitexa\Platform\Wm\Domain\Model;
 
 /**
  * DTO for a registered WM app. Returned by WmAppRegistry and serialized in GET /api/platform/wm/apps.

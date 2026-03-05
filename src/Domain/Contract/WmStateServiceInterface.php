@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Contract;
+namespace Semitexa\Platform\Wm\Domain\Contract;
 
 /**
  * Contract for reading and writing WM window state (session-backed in MVP).

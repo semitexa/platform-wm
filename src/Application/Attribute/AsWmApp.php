@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Attributes;
+namespace Semitexa\Platform\Wm\Application\Attribute;
 
 use Attribute;
 

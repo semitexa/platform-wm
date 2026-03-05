@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Event;
+namespace Semitexa\Platform\Wm\Application\Service;
 
 use Semitexa\Ssr\Async\AsyncResourceSseServer;
 

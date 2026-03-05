@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Application\Event\PayloadHandler;
+namespace Semitexa\Platform\Wm\Application\Handler\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Attributes\InjectAsReadonly;
@@ -14,8 +14,8 @@ use Semitexa\Core\Response;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Platform\Wm\Application\Payload\Request\WmDesktopPayload;
 use Semitexa\Platform\Wm\Application\Resource\WmDesktopResource;
-use Semitexa\Platform\Wm\Registry\WmAppRegistry;
-use Semitexa\Platform\Wm\Service\WmStateService;
+use Semitexa\Platform\Wm\Application\Registry\WmAppRegistry;
+use Semitexa\Platform\Wm\Application\Service\WmStateService;
 
 #[AsPayloadHandler(payload: WmDesktopPayload::class, resource: WmDesktopResource::class)]
 final class WmDesktopHandler implements HandlerInterface

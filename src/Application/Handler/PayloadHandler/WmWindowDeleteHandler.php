@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Application\Event\PayloadHandler;
+namespace Semitexa\Platform\Wm\Application\Handler\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Attributes\InjectAsReadonly;
@@ -12,8 +12,8 @@ use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Response;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Platform\Wm\Application\Payload\Request\WmWindowDeletePayload;
-use Semitexa\Platform\Wm\Event\WmEventBus;
-use Semitexa\Platform\Wm\Service\WmStateService;
+use Semitexa\Platform\Wm\Application\Service\WmEventBus;
+use Semitexa\Platform\Wm\Application\Service\WmStateService;
 
 #[AsPayloadHandler(payload: WmWindowDeletePayload::class, resource: \Semitexa\Core\Http\Response\GenericResponse::class)]
 final class WmWindowDeleteHandler implements HandlerInterface

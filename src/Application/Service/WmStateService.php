@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Service;
+namespace Semitexa\Platform\Wm\Application\Service;
 
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Platform\Wm\Application\Payload\Session\WmStateSessionPayload;
-use Semitexa\Platform\Wm\Contract\WmStateServiceInterface;
-use Semitexa\Platform\Wm\Registry\WmAppRegistry;
+use Semitexa\Platform\Wm\Domain\Contract\WmStateServiceInterface;
+use Semitexa\Platform\Wm\Application\Registry\WmAppRegistry;
 
 /**
  * Reads and writes WM window state from/to session.

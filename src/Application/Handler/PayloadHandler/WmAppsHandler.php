@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Application\Event\PayloadHandler;
+namespace Semitexa\Platform\Wm\Application\Handler\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Contract\HandlerInterface;
@@ -10,7 +10,7 @@ use Semitexa\Core\Contract\PayloadInterface;
 use Semitexa\Core\Contract\ResourceInterface;
 use Semitexa\Core\Response;
 use Semitexa\Platform\Wm\Application\Payload\Request\WmAppsPayload;
-use Semitexa\Platform\Wm\Registry\WmAppRegistry;
+use Semitexa\Platform\Wm\Application\Registry\WmAppRegistry;
 
 #[AsPayloadHandler(payload: WmAppsPayload::class, resource: \Semitexa\Core\Http\Response\GenericResponse::class)]
 final class WmAppsHandler implements HandlerInterface

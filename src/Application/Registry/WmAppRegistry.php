@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Platform\Wm\Registry;
+namespace Semitexa\Platform\Wm\Application\Registry;
 
 use Semitexa\Core\Discovery\ClassDiscovery;
-use Semitexa\Platform\Wm\App\WmAppDescriptor;
-use Semitexa\Platform\Wm\Attributes\AsWmApp;
+use Semitexa\Platform\Wm\Domain\Model\WmAppDescriptor;
+use Semitexa\Platform\Wm\Application\Attribute\AsWmApp;
 
 /**
  * Discovers and returns all WM apps registered via #[AsWmApp] in modules.
