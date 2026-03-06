@@ -282,10 +282,16 @@ export function init(bootstrap) {
             el.style.width = '100vw';
             el.style.height = 'calc(100vh - 48px)';
         } else {
-            el.style.left = b.x + 'px';
-            el.style.top = b.y + 'px';
-            el.style.width = b.w + 'px';
-            el.style.height = b.h + 'px';
+            const vw = container.clientWidth;
+            const vh = container.clientHeight;
+            const x = Math.max(0, Math.min(b.x, vw - 200));
+            const y = Math.max(0, Math.min(b.y, vh - 120));
+            const bw = Math.min(b.w, Math.max(200, vw - x));
+            const bh = Math.min(b.h, Math.max(120, vh - y));
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.style.width = bw + 'px';
+            el.style.height = bh + 'px';
         }
     }
 
