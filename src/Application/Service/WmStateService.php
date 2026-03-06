@@ -43,7 +43,7 @@ final class WmStateService implements WmStateServiceInterface
         foreach ($windows as $i => $w) {
             if (!isset($w['bounds'])) {
                 $offset = $i * 30;
-                $windows[$i]['bounds'] = ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 400, 'h' => 300];
+                $windows[$i]['bounds'] = ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 800, 'h' => 600];
                 $changed = true;
             }
             if (!isset($w['state'])) {
@@ -79,7 +79,7 @@ final class WmStateService implements WmStateServiceInterface
             'context' => $context,
             'title' => $title,
             'order' => $order,
-            'bounds' => ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 400, 'h' => 300],
+            'bounds' => ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 800, 'h' => 600],
             'state' => 'normal',
             'groupId' => null,
         ];
@@ -188,7 +188,7 @@ final class WmStateService implements WmStateServiceInterface
         foreach ($windows as $i => $w) {
             if (in_array($w['id'] ?? '', $windowIds, true)) {
                 if ($firstBounds === null) {
-                    $firstBounds = $w['bounds'] ?? ['x' => 50, 'y' => 50, 'w' => 400, 'h' => 300];
+                    $firstBounds = $w['bounds'] ?? ['x' => 50, 'y' => 50, 'w' => 800, 'h' => 600];
                 }
                 $windows[$i]['groupId'] = $groupId;
                 $windows[$i]['groupOrder'] = $groupOrder++;

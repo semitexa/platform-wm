@@ -275,7 +275,7 @@ export function init(bootstrap) {
     }
 
     function applyBounds(el, w) {
-        const b = w.bounds || { x: 50, y: 50, w: 400, h: 300 };
+        const b = w.bounds || { x: 50, y: 50, w: 800, h: 600 };
         if (w.state === 'maximized') {
             el.style.left = '0';
             el.style.top = '0';
