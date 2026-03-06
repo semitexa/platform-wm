@@ -19,6 +19,10 @@ final class WmStateService implements WmStateServiceInterface
     private const UPDATABLE_KEYS = ['bounds', 'state', 'order', 'title', 'groupId'];
     private const MIN_WIDTH = 200;
     private const MIN_HEIGHT = 120;
+    private const DEFAULT_X = 50;
+    private const DEFAULT_Y = 50;
+    private const DEFAULT_WIDTH = 800;
+    private const DEFAULT_HEIGHT = 600;
 
     public function __construct(
         private readonly SessionInterface $session,
@@ -28,6 +32,17 @@ final class WmStateService implements WmStateServiceInterface
     public static function fromSession(SessionInterface $session): self
     {
         return new self($session);
+    }
+
+    /** @return array{x: int, y: int, w: int, h: int} */
+    private static function defaultBounds(int $offset = 0): array
+    {
+        return [
+            'x' => self::DEFAULT_X + $offset,
+            'y' => self::DEFAULT_Y + $offset,
+            'w' => self::DEFAULT_WIDTH,
+            'h' => self::DEFAULT_HEIGHT,
+        ];
     }
 
     /**
@@ -43,7 +58,7 @@ final class WmStateService implements WmStateServiceInterface
         foreach ($windows as $i => $w) {
             if (!isset($w['bounds'])) {
                 $offset = $i * 30;
-                $windows[$i]['bounds'] = ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 400, 'h' => 300];
+                $windows[$i]['bounds'] = self::defaultBounds($offset);
                 $changed = true;
             }
             if (!isset($w['state'])) {
@@ -79,7 +94,7 @@ final class WmStateService implements WmStateServiceInterface
             'context' => $context,
             'title' => $title,
             'order' => $order,
-            'bounds' => ['x' => 50 + $offset, 'y' => 50 + $offset, 'w' => 400, 'h' => 300],
+            'bounds' => self::defaultBounds($offset),
             'state' => 'normal',
             'groupId' => null,
         ];
@@ -188,7 +203,7 @@ final class WmStateService implements WmStateServiceInterface
         foreach ($windows as $i => $w) {
             if (in_array($w['id'] ?? '', $windowIds, true)) {
                 if ($firstBounds === null) {
-                    $firstBounds = $w['bounds'] ?? ['x' => 50, 'y' => 50, 'w' => 400, 'h' => 300];
+                    $firstBounds = $w['bounds'] ?? self::defaultBounds();
                 }
                 $windows[$i]['groupId'] = $groupId;
                 $windows[$i]['groupOrder'] = $groupOrder++;

@@ -275,17 +275,23 @@ export function init(bootstrap) {
     }
 
     function applyBounds(el, w) {
-        const b = w.bounds || { x: 50, y: 50, w: 400, h: 300 };
+        const b = w.bounds || { x: 50, y: 50, w: 800, h: 600 };
         if (w.state === 'maximized') {
             el.style.left = '0';
             el.style.top = '0';
             el.style.width = '100vw';
             el.style.height = 'calc(100vh - 48px)';
         } else {
-            el.style.left = b.x + 'px';
-            el.style.top = b.y + 'px';
-            el.style.width = b.w + 'px';
-            el.style.height = b.h + 'px';
+            const vw = container.clientWidth;
+            const vh = container.clientHeight;
+            const x = Math.max(0, Math.min(b.x, vw - 200));
+            const y = Math.max(0, Math.min(b.y, vh - 120));
+            const bw = Math.min(b.w, Math.max(200, vw - x));
+            const bh = Math.min(b.h, Math.max(120, vh - y));
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.style.width = bw + 'px';
+            el.style.height = bh + 'px';
         }
     }
 
