@@ -74,6 +74,14 @@ export function defineWindowFrame(apps, buildAppUrl) {
             return this.shadowRoot.querySelector('iframe');
         }
 
+        /** Hide the built-in titlebar (used when grouped — shared control bar is shown instead) */
+        hideTitlebar() {
+            const tb = this.shadowRoot.querySelector('.titlebar');
+            if (tb) tb.style.display = 'none';
+            const content = this.shadowRoot.querySelector('.content');
+            if (content) content.style.borderRadius = '0 0 8px 8px';
+        }
+
         /** Update the displayed title */
         setTitle(title) {
             this._title = title;
