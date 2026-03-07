@@ -117,6 +117,24 @@ export function init(bootstrap) {
     // --- Window frame map (for iframe lookups) ---
     /** @type {Map<string, HTMLElement>} */
     const frameElements = new Map();
+    // Persistent map: iframe contentWindow → windowId (survives re-renders)
+    /** @type {Map<Window, string>} */
+    const iframeSourceMap = new Map();
+
+    function trackIframeSource(windowId, frame) {
+        const iframe = frame.iframeEl || frame.querySelector('iframe');
+        if (iframe && iframe.contentWindow) {
+            iframeSourceMap.set(iframe.contentWindow, windowId);
+        }
+        // Also track when iframe loads (cross-origin may reset contentWindow)
+        if (iframe) {
+            iframe.addEventListener('load', () => {
+                if (iframe.contentWindow) {
+                    iframeSourceMap.set(iframe.contentWindow, windowId);
+                }
+            }, { once: true });
+        }
+    }
 
     // --- Render ---
     function renderWindows() {
@@ -196,6 +214,7 @@ export function init(bootstrap) {
 
         container.appendChild(frame);
         frameElements.set(w.id, frame);
+        trackIframeSource(w.id, frame);
     }
 
     function renderGroupedWindow(groupId, members) {
@@ -216,7 +235,34 @@ export function init(bootstrap) {
         applyBounds(wrapper, activeWindow);
         wrapper.style.zIndex = String(stackManager.getZIndex(activeTabId));
 
-        // Tab bar
+        // Shared control bar (title + close/min/max) — above tabs
+        const controlBar = document.createElement('div');
+        controlBar.className = 'wm-group-controlbar';
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'wm-group-controlbar__title';
+        titleSpan.textContent = activeWindow.title || activeWindow.appId;
+        controlBar.appendChild(titleSpan);
+
+        const btnArea = document.createElement('div');
+        btnArea.className = 'wm-group-controlbar__buttons';
+        for (const [action, label] of [['minimize', '\u2212'], ['maximize', '\u25a1'], ['close', '\u00d7']]) {
+            const btn = document.createElement('button');
+            btn.className = 'wm-group-controlbar__btn' + (action === 'close' ? ' close' : '');
+            btn.textContent = label;
+            btn.title = action.charAt(0).toUpperCase() + action.slice(1);
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (action === 'close') closeWindow(activeTabId);
+                else if (action === 'minimize') minimizeWindow(activeTabId);
+                else if (action === 'maximize') toggleMaximize(activeTabId);
+            });
+            btnArea.appendChild(btn);
+        }
+        controlBar.appendChild(btnArea);
+        wrapper.appendChild(controlBar);
+
+        // Tab bar — below control bar
         const tabBar = tabGroup.createTabBar(members, activeTabId);
         wrapper.appendChild(tabBar);
 
@@ -224,6 +270,7 @@ export function init(bootstrap) {
         for (const m of members) {
             const frame = document.createElement('wm-window-frame');
             frame.setWindow(m);
+            frame.hideTitlebar();
             frame.style.position = 'relative';
             frame.style.width = '100%';
             frame.style.flex = '1';
@@ -236,10 +283,11 @@ export function init(bootstrap) {
 
             wrapper.appendChild(frame);
             frameElements.set(m.id, frame);
+            trackIframeSource(m.id, frame);
         }
 
-        // Drag via tab bar
-        dragManager.attach(tabBar, wrapper, {
+        // Drag via control bar AND tab bar
+        const dragOpts = {
             onStart() {
                 stackManager.focus(activeTabId);
                 wrapper.style.zIndex = String(stackManager.getZIndex(activeTabId));
@@ -252,7 +300,9 @@ export function init(bootstrap) {
                     updateWindow(m.id, { bounds });
                 }
             },
-        });
+        };
+        dragManager.attach(controlBar, wrapper, dragOpts);
+        dragManager.attach(tabBar, wrapper, dragOpts);
 
         // Resize
         resizeManager.attach(wrapper, {
@@ -303,9 +353,19 @@ export function init(bootstrap) {
     }
 
     // --- Window actions ---
-    function openWindow(appId, context) {
-        return createWindow(appId, context).then(data => {
+    function openWindow(appId, context, parentWindowId) {
+        return createWindow(appId, context, parentWindowId).then(data => {
             if (data.window) {
+                locallyCreatedIds.add(data.window.id);
+                // If the backend auto-grouped, update existing windows' groupId too
+                if (data.window.groupId) {
+                    for (const w of state.windows) {
+                        if (w.id === parentWindowId && !w.groupId) {
+                            w.groupId = data.window.groupId;
+                            w.groupOrder = 0;
+                        }
+                    }
+                }
                 state.windows.push(data.window);
                 stackManager.add(data.window.id);
                 stackManager.focus(data.window.id);
@@ -319,6 +379,10 @@ export function init(bootstrap) {
         return deleteWindow(windowId).then(() => {
             state.windows = state.windows.filter(w => w.id !== windowId);
             stackManager.remove(windowId);
+            // Clean up iframe source tracking
+            for (const [source, id] of iframeSourceMap) {
+                if (id === windowId) { iframeSourceMap.delete(source); break; }
+            }
             frameElements.delete(windowId);
             preMaxBounds.delete(windowId);
             renderWindows();
@@ -364,10 +428,18 @@ export function init(bootstrap) {
     }
 
     // --- SSE ---
+    // Track window IDs that this tab created locally (to avoid SSE double-add)
+    const locallyCreatedIds = new Set();
+
     new SseClient(sseUrl, (event, payload) => {
         switch (event) {
             case 'window.open':
                 if (payload && !state.windows.some(w => w.id === payload.id)) {
+                    if (locallyCreatedIds.has(payload.id)) {
+                        // Already added by openWindow() — skip to avoid duplicate
+                        locallyCreatedIds.delete(payload.id);
+                        break;
+                    }
                     state.windows.push(payload);
                     stackManager.add(payload.id);
                     renderWindows();
@@ -398,8 +470,15 @@ export function init(bootstrap) {
                 break;
         }
 
-        // Broadcast to iframes
-        messageBus.broadcastToIframes(event, payload, getIframeInfos);
+        // Broadcast to iframes — but don't send window.open to the window
+        // that was just opened (it hasn't loaded yet and can't use the event)
+        if (event === 'window.open' && payload) {
+            messageBus.broadcastToIframes(event, payload, () =>
+                getIframeInfos().filter(info => info.windowId !== payload.id)
+            );
+        } else {
+            messageBus.broadcastToIframes(event, payload, getIframeInfos);
+        }
     });
 
     // --- Message Bus ---
@@ -412,6 +491,10 @@ export function init(bootstrap) {
             return updateWindow(windowId, updates);
         },
         getWindowIdForSource(source) {
+            // Fast path: persistent source map (survives re-renders)
+            const fromMap = iframeSourceMap.get(source);
+            if (fromMap) return fromMap;
+            // Fallback: scan current frame elements
             for (const [id, frame] of frameElements) {
                 const iframe = frame.iframeEl || frame.querySelector('iframe');
                 if (iframe && iframe.contentWindow === source) return id;

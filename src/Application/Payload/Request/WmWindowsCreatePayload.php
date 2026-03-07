@@ -16,6 +16,7 @@ class WmWindowsCreatePayload implements PayloadInterface
     public string $appId = '';
     /** @var array<string, mixed> */
     public array $context = [];
+    public ?string $parentWindowId = null;
 
     public function setAppId(string $appId): void
     {
@@ -26,5 +27,10 @@ class WmWindowsCreatePayload implements PayloadInterface
     public function setContext(array $context): void
     {
         $this->context = $context;
+    }
+
+    public function setParentWindowId(?string $parentWindowId): void
+    {
+        $this->parentWindowId = $parentWindowId;
     }
 }

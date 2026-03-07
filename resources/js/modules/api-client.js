@@ -25,8 +25,10 @@ export function updateWindow(id, updates) {
     return api('PATCH', '/windows/' + encodeURIComponent(id), { updates });
 }
 
-export function createWindow(appId, context) {
-    return api('POST', '/windows', { appId, context: context || {} });
+export function createWindow(appId, context, parentWindowId) {
+    const body = { appId, context: context || {} };
+    if (parentWindowId) body.parentWindowId = parentWindowId;
+    return api('POST', '/windows', body);
 }
 
 export function deleteWindow(id) {

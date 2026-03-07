@@ -79,7 +79,7 @@ final class WmStateService implements WmStateServiceInterface
         return $windows;
     }
 
-    public function addWindow(string $appId, array $context = []): array
+    public function addWindow(string $appId, array $context = [], ?string $parentWindowId = null): array
     {
         $payload = $this->session->getPayload(WmStateSessionPayload::class);
         $windows = $payload->getWindows();
@@ -87,6 +87,37 @@ final class WmStateService implements WmStateServiceInterface
         $app = WmAppRegistry::get($appId);
         $title = $app !== null ? $app->title : $appId;
         $id = 'wm_' . bin2hex(random_bytes(8));
+
+        // Auto-group with parent window if parentWindowId is provided
+        $groupId = null;
+        $groupOrder = 0;
+        $bounds = null;
+        if ($parentWindowId !== null) {
+            foreach ($windows as $i => $w) {
+                if (($w['id'] ?? '') === $parentWindowId) {
+                    $bounds = $w['bounds'] ?? null;
+                    if (!empty($w['groupId'])) {
+                        // Parent already in a group — join it
+                        $groupId = $w['groupId'];
+                        $maxGroupOrder = 0;
+                        foreach ($windows as $gw) {
+                            if (($gw['groupId'] ?? null) === $groupId && isset($gw['groupOrder'])) {
+                                $maxGroupOrder = max($maxGroupOrder, $gw['groupOrder']);
+                            }
+                        }
+                        $groupOrder = $maxGroupOrder + 1;
+                    } else {
+                        // Parent has no group — create new group for both
+                        $groupId = 'grp_' . bin2hex(random_bytes(6));
+                        $windows[$i]['groupId'] = $groupId;
+                        $windows[$i]['groupOrder'] = 0;
+                        $groupOrder = 1;
+                    }
+                    break;
+                }
+            }
+        }
+
         $offset = count($windows) * 30;
         $window = [
             'id' => $id,
@@ -94,10 +125,13 @@ final class WmStateService implements WmStateServiceInterface
             'context' => $context,
             'title' => $title,
             'order' => $order,
-            'bounds' => self::defaultBounds($offset),
+            'bounds' => $bounds ?? self::defaultBounds($offset),
             'state' => 'normal',
-            'groupId' => null,
+            'groupId' => $groupId,
         ];
+        if ($groupId !== null) {
+            $window['groupOrder'] = $groupOrder;
+        }
         $windows[] = $window;
         $payload->setWindows($windows);
         $this->session->setPayload($payload);

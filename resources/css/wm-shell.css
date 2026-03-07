@@ -33,11 +33,19 @@ body { margin: 0; font-family: system-ui, sans-serif; background: #1e1e2e; color
 .wm-resize-handle.sw { bottom: -4px; left: -4px; width: 12px; height: 12px; cursor: sw-resize; }
 .wm-resize-handle.se { bottom: -4px; right: -4px; width: 12px; height: 12px; cursor: se-resize; }
 
+/* Group control bar (shared titlebar above tabs) */
+.wm-group-controlbar { display: flex; align-items: center; padding: 6px 10px; background: #45475a; cursor: move; user-select: none; border-radius: 8px 8px 0 0; }
+.wm-group-controlbar__title { flex: 1; font-size: 13px; color: #cdd6f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-group-controlbar__buttons { display: flex; gap: 2px; }
+.wm-group-controlbar__btn { width: 28px; height: 24px; border: none; border-radius: 4px; background: transparent; color: #cdd6f4; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+.wm-group-controlbar__btn:hover { background: #585b70; }
+.wm-group-controlbar__btn.close:hover { background: #f38ba8; }
+
 /* Tab group */
-.wm-tab-bar { display: flex; background: #313244; border-radius: 8px 8px 0 0; overflow-x: auto; }
-.wm-tab { padding: 6px 12px; font-size: 12px; color: #a6adc8; cursor: pointer; border: none; background: transparent; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; transition: background .1s; user-select: none; }
-.wm-tab:hover { background: #45475a; }
-.wm-tab.active { background: #45475a; color: #cdd6f4; }
+.wm-tab-bar { display: flex; background: #313244; overflow-x: auto; border-bottom: 1px solid #585b70; }
+.wm-tab { padding: 6px 12px; font-size: 12px; color: #a6adc8; cursor: pointer; border: none; background: transparent; white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; transition: background .1s; user-select: none; border-bottom: 2px solid transparent; }
+.wm-tab:hover { background: #3b3d52; }
+.wm-tab.active { background: #45475a; color: #cdd6f4; border-bottom-color: #89b4fa; }
 .wm-tab .tab-close { margin-left: 6px; opacity: .5; }
 .wm-tab .tab-close:hover { opacity: 1; }
 

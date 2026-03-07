@@ -34,7 +34,8 @@ export class MessageBus {
         // Legacy protocol
         const a = data.action;
         if (a === 'wm.open' && data.appId) {
-            this._onOpen(data.appId, data.context || {});
+            const parentWindowId = this._resolveWindowId(ev);
+            this._onOpen(data.appId, data.context || {}, parentWindowId);
         }
         if (a === 'wm.closeSelf') {
             const windowId = this._resolveWindowId(ev);
@@ -49,9 +50,11 @@ export class MessageBus {
 
         try {
             switch (action) {
-                case 'wm.open':
-                    result = await this._onOpen(data.appId, data.context || {});
+                case 'wm.open': {
+                    const parentWindowId = this._resolveWindowId(ev);
+                    result = await this._onOpen(data.appId, data.context || {}, parentWindowId);
                     break;
+                }
                 case 'wm.closeSelf': {
                     const windowId = this._resolveWindowId(ev) || data.windowId;
                     if (windowId) result = await this._onClose(windowId);
