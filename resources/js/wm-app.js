@@ -121,8 +121,16 @@ export function init(bootstrap) {
     /** @type {Map<Window, string>} */
     const iframeSourceMap = new Map();
 
+    function cleanIframeSourceMap(windowId) {
+        for (const [source, id] of iframeSourceMap) {
+            if (id === windowId) iframeSourceMap.delete(source);
+        }
+    }
+
     function trackIframeSource(windowId, frame) {
         const iframe = frame.iframeEl || frame.querySelector('iframe');
+        // Remove stale entries for this windowId before setting new ones
+        cleanIframeSourceMap(windowId);
         if (iframe && iframe.contentWindow) {
             iframeSourceMap.set(iframe.contentWindow, windowId);
         }
@@ -130,6 +138,7 @@ export function init(bootstrap) {
         if (iframe) {
             iframe.addEventListener('load', () => {
                 if (iframe.contentWindow) {
+                    cleanIframeSourceMap(windowId);
                     iframeSourceMap.set(iframe.contentWindow, windowId);
                 }
             }, { once: true });
@@ -253,9 +262,19 @@ export function init(bootstrap) {
             btn.title = action.charAt(0).toUpperCase() + action.slice(1);
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                if (action === 'close') closeWindow(activeTabId);
-                else if (action === 'minimize') minimizeWindow(activeTabId);
-                else if (action === 'maximize') toggleMaximize(activeTabId);
+                if (action === 'close') {
+                    closeWindow(activeTabId);
+                } else if (action === 'minimize') {
+                    for (const m of members) minimizeWindow(m.id);
+                } else if (action === 'maximize') {
+                    // Toggle maximize for all group members based on active tab's state
+                    const activeW = members.find(m => m.id === activeTabId) || members[0];
+                    const shouldMaximize = activeW.state !== 'maximized';
+                    for (const m of members) {
+                        if (shouldMaximize && m.state !== 'maximized') toggleMaximize(m.id);
+                        else if (!shouldMaximize && m.state === 'maximized') toggleMaximize(m.id);
+                    }
+                }
             });
             btnArea.appendChild(btn);
         }
@@ -380,9 +399,7 @@ export function init(bootstrap) {
             state.windows = state.windows.filter(w => w.id !== windowId);
             stackManager.remove(windowId);
             // Clean up iframe source tracking
-            for (const [source, id] of iframeSourceMap) {
-                if (id === windowId) { iframeSourceMap.delete(source); break; }
-            }
+            cleanIframeSourceMap(windowId);
             frameElements.delete(windowId);
             preMaxBounds.delete(windowId);
             renderWindows();
