@@ -14,6 +14,9 @@ body { margin: 0; font-family: system-ui, sans-serif; background: #1e1e2e; color
 #wm-app-launcher { display: flex; gap: 6px; align-items: center; }
 #wm-taskbar { flex: 1; display: flex; gap: 4px; align-items: center; overflow-x: auto; min-width: 0; padding: 0 8px; }
 #wm-app-bar-right { display: flex; gap: 8px; align-items: center; }
+.wm-app-launcher__btn { padding: 4px 10px; border-radius: 6px; border: none; background: #45475a; color: #cdd6f4; cursor: pointer; font-size: 12px; }
+.wm-app-bar__user { font-size: 12px; color: #a6adc8; }
+.wm-app-bar__logout { padding: 4px 10px; border-radius: 6px; border: none; background: #f38ba8; color: #1e1e2e; cursor: pointer; font-size: 12px; font-weight: 600; }
 
 /* Taskbar items */
 .wm-taskbar-item { padding: 4px 10px; border-radius: 4px; border: none; background: transparent; color: #a6adc8; cursor: pointer; font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 4px; transition: background .1s, color .1s; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
