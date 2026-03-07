@@ -544,7 +544,7 @@ export function init(bootstrap) {
         for (const app of apps) {
             const btn = document.createElement('button');
             btn.textContent = app.title;
-            btn.style.cssText = 'padding:4px 10px;border-radius:6px;border:none;background:#45475a;color:#cdd6f4;cursor:pointer;font-size:12px;';
+            btn.className = 'wm-app-launcher__btn';
             btn.addEventListener('click', () => openWindow(app.id, {}));
             launcherEl.appendChild(btn);
         }
@@ -556,14 +556,14 @@ export function init(bootstrap) {
 
         if (user && user.id) {
             const userLabel = document.createElement('span');
-            userLabel.style.cssText = 'font-size:12px;color:#a6adc8;';
+            userLabel.className = 'wm-app-bar__user';
             userLabel.textContent = user.id;
             rightBarEl.appendChild(userLabel);
         }
 
         const logoutBtn = document.createElement('button');
         logoutBtn.textContent = 'Logout';
-        logoutBtn.style.cssText = 'padding:4px 10px;border-radius:6px;border:none;background:#f38ba8;color:#1e1e2e;cursor:pointer;font-size:12px;font-weight:600;';
+        logoutBtn.className = 'wm-app-bar__logout';
         logoutBtn.addEventListener('click', logout);
         rightBarEl.appendChild(logoutBtn);
     }
