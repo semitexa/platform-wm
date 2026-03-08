@@ -3,7 +3,7 @@
  * Orchestrates all window management modules.
  */
 
-import { configure, updateWindow, createWindow, deleteWindow, getState, groupWindows, ungroupWindow, logout } from './modules/api-client.js';
+import { configure, updateWindow, createWindow, deleteWindow, getState, groupWindows, ungroupWindow, logout, unlock } from './modules/api-client.js';
 import { SseClient } from './modules/sse-client.js';
 import { StackManager } from './modules/stack-manager.js';
 import { DragManager } from './modules/drag-manager.js';
@@ -62,12 +62,53 @@ export function init(bootstrap) {
 
     // --- DOM references ---
     const container = document.getElementById('wm-windows');
+    const desktopEl = document.getElementById('wm-desktop');
     const desktopIconsEl = document.getElementById('wm-desktop-icons');
     const taskbarEl = document.getElementById('wm-taskbar');
     const launcherEl = document.getElementById('wm-app-launcher');
     const rightBarEl = document.getElementById('wm-app-bar-right');
+    const uiState = {
+        launcherOpen: false,
+        showDesktop: false,
+        restoreStates: new Map(),
+        locked: false,
+        unlocking: false,
+    };
+    const uiRefs = {
+        launcherSearch: null,
+        launcherList: null,
+        launcherToggle: null,
+        launcherPanel: null,
+        showDesktopBtn: null,
+        windowsStat: null,
+        clockEl: null,
+        lockOverlay: null,
+        lockInput: null,
+    };
 
     if (!container) return;
+
+    function applyDesktopBackground(value) {
+        if (!desktopEl) return;
+        const v = typeof value === 'string' ? value.trim() : '';
+        if (v === '') {
+            desktopEl.style.removeProperty('background');
+            return;
+        }
+        desktopEl.style.background = v;
+    }
+
+    function loadDesktopBackgroundSetting() {
+        return fetch('/api/platform/settings?scope=user&module_key=platform-wm', { credentials: 'include' })
+            .then((r) => r.json())
+            .then((data) => {
+                const list = Array.isArray(data.settings) ? data.settings : [];
+                const row = list.find((s) => s && s.key === 'desktop_background');
+                if (!row) return;
+                applyDesktopBackground(row.value);
+            })
+            .catch(() => {});
+    }
 
     // --- Tab Group ---
     const tabGroup = new TabGroup({
@@ -108,7 +149,11 @@ export function init(bootstrap) {
                 stackManager.focus(windowId);
                 renderWindows();
             }
-        }
+        },
+        onLaunch(appId) {
+            if (!apps.some(a => a.id === appId)) return;
+            openWindow(appId, {});
+        },
     }) : null;
 
     // --- Desktop Icons ---
@@ -176,6 +221,10 @@ export function init(bootstrap) {
         if (taskbar) {
             taskbar.render(state.windows, stackManager.getTopWindowId(), apps);
         }
+        if (uiRefs.launcherList) {
+            renderLauncherList(uiRefs.launcherSearch ? uiRefs.launcherSearch.value : '');
+        }
+        updateAppBarMeta();
     }
 
     function renderSingleWindow(w) {
@@ -543,34 +592,343 @@ export function init(bootstrap) {
     }
 
     // --- Render app launcher ---
+    function setLauncherOpen(open) {
+        uiState.launcherOpen = open;
+        if (uiRefs.launcherPanel) {
+            uiRefs.launcherPanel.hidden = !open;
+        }
+        if (uiRefs.launcherToggle) {
+            uiRefs.launcherToggle.classList.toggle('active', open);
+            uiRefs.launcherToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        if (open && uiRefs.launcherSearch) {
+            uiRefs.launcherSearch.focus();
+            uiRefs.launcherSearch.select();
+        }
+    }
+
+    function renderLauncherList(filterText = '') {
+        if (!uiRefs.launcherList) return;
+        uiRefs.launcherList.innerHTML = '';
+
+        const q = (filterText || '').trim().toLowerCase();
+        const filtered = apps.filter((app) => {
+            if (q === '') return true;
+            return app.title.toLowerCase().includes(q) || app.id.toLowerCase().includes(q);
+        });
+
+        for (const app of filtered) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'wm-launcher__app';
+
+            const icon = document.createElement('span');
+            icon.className = 'wm-launcher__app-icon';
+            icon.textContent = app.icon || app.title.charAt(0).toUpperCase();
+            item.appendChild(icon);
+
+            const meta = document.createElement('span');
+            meta.className = 'wm-launcher__app-meta';
+
+            const title = document.createElement('span');
+            title.className = 'wm-launcher__app-title';
+            title.textContent = app.title;
+            meta.appendChild(title);
+
+            const detail = document.createElement('span');
+            detail.className = 'wm-launcher__app-detail';
+            const running = state.windows.filter(w => w.appId === app.id).length;
+            detail.textContent = running > 0 ? `${running} running` : app.id;
+            meta.appendChild(detail);
+
+            item.appendChild(meta);
+
+            item.addEventListener('click', () => {
+                openWindow(app.id, {});
+                setLauncherOpen(false);
+            });
+
+            uiRefs.launcherList.appendChild(item);
+        }
+
+        if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'wm-launcher__empty';
+            empty.textContent = 'No apps found';
+            uiRefs.launcherList.appendChild(empty);
+        }
+    }
+
     function renderAppLauncher() {
         if (!launcherEl) return;
         launcherEl.innerHTML = '';
-        for (const app of apps) {
-            const btn = document.createElement('button');
-            btn.textContent = app.title;
-            btn.className = 'wm-app-launcher__btn';
-            btn.addEventListener('click', () => openWindow(app.id, {}));
-            launcherEl.appendChild(btn);
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'wm-launcher__toggle';
+        toggle.textContent = 'Semitexa';
+        toggle.title = 'Open launcher (Ctrl+K)';
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.addEventListener('click', () => setLauncherOpen(!uiState.launcherOpen));
+
+        const panel = document.createElement('div');
+        panel.className = 'wm-launcher__panel';
+        panel.hidden = true;
+
+        const search = document.createElement('input');
+        search.className = 'wm-launcher__search';
+        search.placeholder = 'Search apps...';
+        search.addEventListener('input', () => renderLauncherList(search.value));
+        panel.appendChild(search);
+
+        const list = document.createElement('div');
+        list.className = 'wm-launcher__list';
+        panel.appendChild(list);
+
+        const account = document.createElement('div');
+        account.className = 'wm-launcher__account';
+
+        const accountTitle = document.createElement('div');
+        accountTitle.className = 'wm-launcher__account-title';
+        accountTitle.textContent = user && user.id ? `Account: ${user.id}` : 'Account';
+        account.appendChild(accountTitle);
+
+        const accountActions = document.createElement('div');
+        accountActions.className = 'wm-launcher__account-actions';
+
+        const lockBtn = document.createElement('button');
+        lockBtn.type = 'button';
+        lockBtn.className = 'wm-launcher__account-btn';
+        lockBtn.textContent = 'Lock Screen';
+        lockBtn.addEventListener('click', () => {
+            lockScreen();
+            setLauncherOpen(false);
+        });
+        accountActions.appendChild(lockBtn);
+
+        const switchBtn = document.createElement('button');
+        switchBtn.type = 'button';
+        switchBtn.className = 'wm-launcher__account-btn';
+        switchBtn.textContent = 'Switch User';
+        switchBtn.addEventListener('click', () => logout());
+        accountActions.appendChild(switchBtn);
+
+        const logoutBtn = document.createElement('button');
+        logoutBtn.type = 'button';
+        logoutBtn.className = 'wm-launcher__account-btn danger';
+        logoutBtn.textContent = 'Logout';
+        logoutBtn.addEventListener('click', () => logout());
+        accountActions.appendChild(logoutBtn);
+
+        account.appendChild(accountActions);
+        panel.appendChild(account);
+
+        launcherEl.appendChild(toggle);
+        launcherEl.appendChild(panel);
+
+        uiRefs.launcherToggle = toggle;
+        uiRefs.launcherPanel = panel;
+        uiRefs.launcherSearch = search;
+        uiRefs.launcherList = list;
+
+        renderLauncherList();
+
+        document.addEventListener('pointerdown', (ev) => {
+            if (!uiState.launcherOpen || !launcherEl) return;
+            if (!launcherEl.contains(ev.target)) {
+                setLauncherOpen(false);
+            }
+        }, true);
+    }
+
+    function toggleShowDesktop() {
+        const visibleWindows = state.windows.filter(w => w.state !== 'minimized');
+        const minimizedWindows = state.windows.filter(w => w.state === 'minimized');
+
+        if (visibleWindows.length > 0) {
+            uiState.restoreStates.clear();
+            for (const w of visibleWindows) {
+                uiState.restoreStates.set(w.id, w.state || 'normal');
+                w.state = 'minimized';
+                updateWindow(w.id, { state: 'minimized' });
+            }
+            uiState.showDesktop = true;
+            renderWindows();
+            return;
         }
+
+        if (minimizedWindows.length > 0) {
+            for (const w of minimizedWindows) {
+                const prevState = uiState.restoreStates.get(w.id) || 'normal';
+                w.state = prevState;
+                updateWindow(w.id, { state: w.state });
+            }
+            uiState.restoreStates.clear();
+            uiState.showDesktop = false;
+        }
+        renderWindows();
+    }
+
+    function getUserLabel() {
+        if (!user) return '';
+        if (user.name && String(user.name).trim() !== '') return String(user.name);
+        if (user.email && String(user.email).trim() !== '') return String(user.email);
+        return '';
     }
 
     function renderAppBarRight() {
         if (!rightBarEl) return;
         rightBarEl.innerHTML = '';
 
-        if (user && user.id) {
+        const windowsStat = document.createElement('span');
+        windowsStat.className = 'wm-app-bar__meta';
+        rightBarEl.appendChild(windowsStat);
+        uiRefs.windowsStat = windowsStat;
+
+        const clock = document.createElement('span');
+        clock.className = 'wm-app-bar__clock';
+        rightBarEl.appendChild(clock);
+        uiRefs.clockEl = clock;
+
+        const showDesktopBtn = document.createElement('button');
+        showDesktopBtn.type = 'button';
+        showDesktopBtn.className = 'wm-app-bar__utility';
+        showDesktopBtn.textContent = 'Show Desktop';
+        showDesktopBtn.title = 'Minimize/restore all windows';
+        showDesktopBtn.addEventListener('click', toggleShowDesktop);
+        rightBarEl.appendChild(showDesktopBtn);
+        uiRefs.showDesktopBtn = showDesktopBtn;
+
+        const userLabelText = getUserLabel();
+        if (userLabelText !== '') {
             const userLabel = document.createElement('span');
             userLabel.className = 'wm-app-bar__user';
-            userLabel.textContent = user.id;
+            userLabel.textContent = userLabelText;
             rightBarEl.appendChild(userLabel);
         }
 
-        const logoutBtn = document.createElement('button');
-        logoutBtn.textContent = 'Logout';
-        logoutBtn.className = 'wm-app-bar__logout';
-        logoutBtn.addEventListener('click', logout);
-        rightBarEl.appendChild(logoutBtn);
+        setInterval(updateAppBarMeta, 1000);
+        updateAppBarMeta();
+    }
+
+    function ensureLockOverlay() {
+        if (uiRefs.lockOverlay) return;
+        if (!desktopEl) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'wm-lock-overlay';
+        overlay.hidden = true;
+
+        const card = document.createElement('div');
+        card.className = 'wm-lock-card';
+
+        const title = document.createElement('h2');
+        title.className = 'wm-lock-title';
+        title.textContent = 'Screen Locked';
+        card.appendChild(title);
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'wm-lock-subtitle';
+        subtitle.textContent = user && user.id ? `User: ${user.id}. Enter current account password.` : 'Enter current account password';
+        card.appendChild(subtitle);
+
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.className = 'wm-lock-input';
+        input.placeholder = 'Password';
+        card.appendChild(input);
+
+        const actions = document.createElement('div');
+        actions.className = 'wm-lock-actions';
+
+        const unlockBtn = document.createElement('button');
+        unlockBtn.type = 'button';
+        unlockBtn.className = 'wm-lock-btn';
+        unlockBtn.textContent = 'Unlock';
+        unlockBtn.addEventListener('click', () => tryUnlock());
+        actions.appendChild(unlockBtn);
+
+        const switchBtn = document.createElement('button');
+        switchBtn.type = 'button';
+        switchBtn.className = 'wm-lock-btn secondary';
+        switchBtn.textContent = 'Switch User';
+        switchBtn.addEventListener('click', () => logout());
+        actions.appendChild(switchBtn);
+
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        desktopEl.appendChild(overlay);
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                tryUnlock();
+            }
+        });
+
+        uiRefs.lockOverlay = overlay;
+        uiRefs.lockInput = input;
+    }
+
+    function setLocked(locked) {
+        ensureLockOverlay();
+        uiState.locked = locked;
+        if (!uiRefs.lockOverlay) return;
+        uiRefs.lockOverlay.hidden = !locked;
+        if (locked) {
+            if (uiRefs.lockInput) {
+                uiRefs.lockInput.value = '';
+                uiRefs.lockInput.focus();
+            }
+        }
+    }
+
+    function lockScreen() {
+        setLocked(true);
+    }
+
+    function tryUnlock() {
+        if (!uiRefs.lockInput || uiState.unlocking) return;
+        const password = (uiRefs.lockInput.value || '').trim();
+        if (!password) {
+            uiRefs.lockInput.placeholder = 'Enter password';
+            uiRefs.lockInput.focus();
+            return;
+        }
+
+        uiState.unlocking = true;
+        unlock(password)
+            .then((result) => {
+                if (result && result.success) {
+                    setLocked(false);
+                    return;
+                }
+                if (result && result.unauthorized) {
+                    logout();
+                    return;
+                }
+                uiRefs.lockInput.value = '';
+                uiRefs.lockInput.placeholder = 'Wrong password';
+                uiRefs.lockInput.focus();
+            })
+            .finally(() => {
+                uiState.unlocking = false;
+            });
+    }
+
+    function updateAppBarMeta() {
+        if (uiRefs.windowsStat) {
+            const openCount = state.windows.filter(w => w.state !== 'minimized').length;
+            const total = state.windows.length;
+            uiRefs.windowsStat.textContent = `${openCount}/${total} visible`;
+        }
+        if (uiRefs.showDesktopBtn) {
+            uiRefs.showDesktopBtn.classList.toggle('active', uiState.showDesktop);
+        }
+        if (uiRefs.clockEl) {
+            const now = new Date();
+            uiRefs.clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
     }
 
     // --- Init ---
@@ -578,6 +936,26 @@ export function init(bootstrap) {
     renderWindows();
     renderAppLauncher();
     renderAppBarRight();
+    ensureLockOverlay();
+    loadDesktopBackgroundSetting();
+
+    window.addEventListener('keydown', (e) => {
+        if (uiState.locked && e.target !== uiRefs.lockInput) {
+            e.preventDefault();
+            return;
+        }
+        const key = e.key.toLowerCase();
+        if ((e.ctrlKey || e.metaKey) && key === 'k') {
+            e.preventDefault();
+            setLauncherOpen(!uiState.launcherOpen);
+            renderLauncherList(uiRefs.launcherSearch ? uiRefs.launcherSearch.value : '');
+            return;
+        }
+        if (e.key === 'Escape' && uiState.launcherOpen) {
+            e.preventDefault();
+            setLauncherOpen(false);
+        }
+    });
 
     // --- Global exports for backward compat ---
     window.__WM_OPEN__ = openWindow;
