@@ -37,7 +37,7 @@ final class CustomerWmApp {}
 
 When the shell opens a window, it builds the iframe `src` from `entryUrl` and the window `context`. Context is passed as query parameters. Additionally, the shell injects `_wmWindowId=<windowId>` as a query parameter so the SDK can auto-detect the window ID.
 
-Example: `entryUrl = '/app/customer'`, `context = { id: 42 }`, `windowId = 'wm_a1b2c3d4e5f6g7h8'` → `/app/customer?id=42&_wmWindowId=wm_a1b2c3d4e5f6g7h8`.
+Example: `entryUrl = '/app/customer'`, `context = { id: 42 }`, `windowId = 'wm_a1b2c3d4e5f6a7b8'` → `/app/customer?id=42&_wmWindowId=wm_a1b2c3d4e5f6a7b8`.
 
 ---
 

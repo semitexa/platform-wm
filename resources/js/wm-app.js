@@ -471,10 +471,15 @@ export function init(bootstrap) {
                 }
                 break;
             case 'window.update':
+            case 'window.minimize':
+            case 'window.focus':
                 if (payload && payload.id) {
                     const idx = state.windows.findIndex(w => w.id === payload.id);
                     if (idx !== -1) {
                         state.windows[idx] = { ...state.windows[idx], ...payload };
+                        if (event === 'window.focus') {
+                            stackManager.focus(payload.id);
+                        }
                         renderWindows();
                     }
                 }
