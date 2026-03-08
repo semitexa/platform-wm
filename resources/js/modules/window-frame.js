@@ -34,16 +34,7 @@ export function defineWindowFrame(apps, buildAppUrl) {
             const title = this._title;
             const src = buildAppUrl(this._app, this._context, this._windowId);
             this.shadowRoot.innerHTML =
-                '<style>' +
-                ':host{display:flex;position:absolute;background:#313244;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.3);flex-direction:column;min-width:200px;min-height:120px;}' +
-                '.titlebar{display:flex;align-items:center;padding:6px 10px;background:#45475a;cursor:move;user-select:none;border-radius:8px 8px 0 0;}' +
-                '.title{flex:1;font-size:13px;color:#cdd6f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-                '.btn{width:28px;height:24px;margin-left:4px;border:none;border-radius:4px;background:transparent;color:#cdd6f4;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;}' +
-                '.btn:hover{background:#585b70;}' +
-                '.btn.close:hover{background:#f38ba8;}' +
-                '.content{flex:1;min-height:0;display:flex;overflow:hidden;border-radius:0 0 8px 8px;}' +
-                '.content iframe{width:100%;height:100%;border:none;display:block;flex:1;}' +
-                '</style>' +
+                '<link rel="stylesheet" href="/assets/platform-wm/css/window-frame.css">' +
                 '<div class="titlebar">' +
                 '<span class="title">' + escapeHtml(title) + '</span>' +
                 '<button class="btn minimize" data-action="minimize" title="Minimize">\u2212</button>' +
