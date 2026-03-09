@@ -153,10 +153,15 @@ export function init(bootstrap) {
     function loadDesktopBackgroundSetting() {
         return fetch('/api/platform/settings?scope=user&module_key=platform-wm', { credentials: 'include' })
             .then((r) => {
+                if (r.status === 401 || r.status === 403) {
+                    logout();
+                    return null;
+                }
                 if (!r.ok) throw new Error('Failed to load settings');
                 return r.json();
             })
             .then((data) => {
+                if (!data) return;
                 const list = Array.isArray(data.settings) ? data.settings : [];
                 const row = list.find((s) => s && s.key === 'desktop_background');
                 if (!row) return;
@@ -245,6 +250,7 @@ export function init(bootstrap) {
 
     // --- Render ---
     function renderWindows() {
+        syncShowDesktopState();
         container.innerHTML = '';
         frameElements.clear();
         stackManager.init(state.windows);
@@ -278,6 +284,14 @@ export function init(bootstrap) {
             renderLauncherList(uiRefs.launcherSearch ? uiRefs.launcherSearch.value : '');
         }
         updateAppBarMeta();
+    }
+
+    function syncShowDesktopState() {
+        if (!uiState.showDesktop) return;
+        if (state.windows.some((w) => w.state !== 'minimized')) {
+            uiState.showDesktop = false;
+            uiState.restoreStates.clear();
+        }
     }
 
     function renderSingleWindow(w) {
@@ -927,8 +941,42 @@ export function init(bootstrap) {
             }
         });
 
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab') return;
+            const focusables = [
+                ...overlay.querySelectorAll('input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])')
+            ].filter((el) => !el.hasAttribute('disabled') && !el.getAttribute('aria-hidden'));
+            if (focusables.length === 0) return;
+
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement;
+
+            if (e.shiftKey && active === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && active === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        });
+
         uiRefs.lockOverlay = overlay;
         uiRefs.lockInput = input;
+    }
+
+    function setDesktopInteractivityLocked(locked) {
+        if (!desktopEl || !uiRefs.lockOverlay) return;
+        for (const child of desktopEl.children) {
+            if (child === uiRefs.lockOverlay) continue;
+            if (locked) {
+                child.setAttribute('inert', '');
+                child.setAttribute('aria-hidden', 'true');
+            } else {
+                child.removeAttribute('inert');
+                child.removeAttribute('aria-hidden');
+            }
+        }
     }
 
     function setLocked(locked) {
@@ -936,7 +984,9 @@ export function init(bootstrap) {
         uiState.locked = locked;
         if (!uiRefs.lockOverlay) return;
         uiRefs.lockOverlay.hidden = !locked;
+        setDesktopInteractivityLocked(locked);
         if (locked) {
+            setLauncherOpen(false);
             if (uiRefs.lockInput) {
                 uiRefs.lockInput.value = '';
                 uiRefs.lockInput.focus();
@@ -950,8 +1000,8 @@ export function init(bootstrap) {
 
     function tryUnlock() {
         if (!uiRefs.lockInput || uiState.unlocking) return;
-        const password = (uiRefs.lockInput.value || '').trim();
-        if (!password) {
+        const password = uiRefs.lockInput.value || '';
+        if (password.length === 0) {
             uiRefs.lockInput.placeholder = 'Enter password';
             uiRefs.lockInput.focus();
             return;
@@ -1013,8 +1063,11 @@ export function init(bootstrap) {
     loadDesktopBackgroundSetting();
 
     window.addEventListener('keydown', (e) => {
-        if (uiState.locked && e.target !== uiRefs.lockInput) {
-            e.preventDefault();
+        if (uiState.locked) {
+            const target = e.target instanceof Node ? e.target : null;
+            if (!uiRefs.lockOverlay || !target || !uiRefs.lockOverlay.contains(target)) {
+                e.preventDefault();
+            }
             return;
         }
         const key = e.key.toLowerCase();

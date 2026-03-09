@@ -21,6 +21,7 @@ export class Taskbar {
      */
     render(windows, activeWindowId, apps) {
         this._container.innerHTML = '';
+        const appsById = new Map((apps || []).map((app) => [app.id, app]));
 
         const grouped = new Map();
         for (const w of windows) {
@@ -34,7 +35,7 @@ export class Taskbar {
         for (const appId of orderedAppIds) {
             const appWindows = grouped.get(appId) || [];
             const runningCount = appWindows.length;
-            const app = apps.find(a => a.id === appId) || null;
+            const app = appsById.get(appId) || null;
             const representative = appWindows[0] || null;
             if (runningCount === 0) continue;
 
