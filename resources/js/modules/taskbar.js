@@ -78,10 +78,6 @@ export class Taskbar {
             }
 
             btn.addEventListener('click', () => {
-                if (runningCount === 0) {
-                    this._onLaunch(appId);
-                    return;
-                }
                 if (runningCount === 1) {
                     this._onActivate(appWindows[0].id);
                     return;

@@ -10,6 +10,7 @@
     --wm-accent: #37b7ff;
     --wm-accent-strong: #0ea5e9;
     --wm-danger: #ff6b82;
+    --wm-appbar-height: 56px;
 }
 body {
     margin: 0;
@@ -22,7 +23,7 @@ body {
     min-height: 100vh;
 }
 #wm-desktop { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
-#wm-desktop-icons { position: absolute; top: 0; left: 0; right: 0; bottom: 52px; padding: 16px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; z-index: 1; pointer-events: none; }
+#wm-desktop-icons { position: absolute; top: 0; left: 0; right: 0; bottom: var(--wm-appbar-height); padding: 16px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; z-index: 1; pointer-events: none; }
 #wm-desktop-icons > * { pointer-events: auto; }
 .wm-desktop-icon { width: 72px; padding: 8px; border-radius: 8px; background: transparent; border: none; cursor: pointer; color: var(--wm-text); font-size: 12px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; transition: background .15s; }
 .wm-desktop-icon:hover { background: rgba(55, 183, 255, .18); }
@@ -36,7 +37,7 @@ body {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 56px;
+    height: var(--wm-appbar-height);
     padding: 8px 10px;
     background: var(--wm-panel);
     border-top: 1px solid var(--wm-border);
@@ -294,6 +295,7 @@ body {
     color: var(--wm-text);
     padding: 0 12px;
 }
+.wm-lock-input:focus { outline: 1px solid var(--wm-accent-strong); border-color: var(--wm-accent-strong); }
 .wm-lock-actions {
     margin-top: 10px;
     display: flex;
@@ -314,8 +316,8 @@ body {
 }
 
 @media (max-width: 900px) {
+    :root { --wm-appbar-height: 62px; }
     #wm-app-bar {
-        height: 62px;
         padding: 8px;
     }
     .wm-taskbar-item__label,

@@ -68,8 +68,8 @@ export function unlock(password) {
             return { success: false, unauthorized: true };
         }
         if (!r.ok) {
-            return { success: false };
+            return { success: false, status: r.status };
         }
-        return r.json().catch(() => ({ success: true }));
-    });
+        return r.json().catch(() => ({ success: false }));
+    }).catch(() => ({ success: false, networkError: true }));
 }

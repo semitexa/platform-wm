@@ -74,6 +74,7 @@ export function init(bootstrap) {
         locked: false,
         unlocking: false,
     };
+    let appBarMetaInterval = null;
     const uiRefs = {
         launcherSearch: null,
         launcherList: null,
@@ -94,6 +95,17 @@ export function init(bootstrap) {
         if (v === '') {
             desktopEl.style.removeProperty('background');
             return;
+        }
+        // Sanitize: only allow gradients, colors, and same-origin/data URLs
+        if (/url\s*\(/i.test(v)) {
+            const urls = v.match(/url\s*\(\s*['"]?([^'")]+)['"]?\s*\)/gi) || [];
+            for (const u of urls) {
+                const inner = u.replace(/url\s*\(\s*['"]?|['"]?\s*\)/gi, '');
+                if (!inner.startsWith('data:image/') && !inner.startsWith('/')) {
+                    console.warn('[WM] Blocked external URL in desktop background:', inner);
+                    return;
+                }
+            }
         }
         desktopEl.style.background = v;
     }
@@ -398,7 +410,7 @@ export function init(bootstrap) {
             el.style.left = '0';
             el.style.top = '0';
             el.style.width = '100vw';
-            el.style.height = 'calc(100vh - 48px)';
+            el.style.height = 'calc(100vh - var(--wm-appbar-height, 56px))';
         } else {
             const vw = container.clientWidth;
             const vh = container.clientHeight;
@@ -617,6 +629,12 @@ export function init(bootstrap) {
             return app.title.toLowerCase().includes(q) || app.id.toLowerCase().includes(q);
         });
 
+        // Precompute running counts to avoid O(apps*windows)
+        const runningCounts = new Map();
+        for (const w of state.windows) {
+            runningCounts.set(w.appId, (runningCounts.get(w.appId) || 0) + 1);
+        }
+
         for (const app of filtered) {
             const item = document.createElement('button');
             item.type = 'button';
@@ -637,7 +655,7 @@ export function init(bootstrap) {
 
             const detail = document.createElement('span');
             detail.className = 'wm-launcher__app-detail';
-            const running = state.windows.filter(w => w.appId === app.id).length;
+            const running = runningCounts.get(app.id) || 0;
             detail.textContent = running > 0 ? `${running} running` : app.id;
             meta.appendChild(detail);
 
@@ -732,20 +750,22 @@ export function init(bootstrap) {
         uiRefs.launcherList = list;
 
         renderLauncherList();
-
-        document.addEventListener('pointerdown', (ev) => {
-            if (!uiState.launcherOpen || !launcherEl) return;
-            if (!launcherEl.contains(ev.target)) {
-                setLauncherOpen(false);
-            }
-        }, true);
     }
 
-    function toggleShowDesktop() {
-        const visibleWindows = state.windows.filter(w => w.state !== 'minimized');
-        const minimizedWindows = state.windows.filter(w => w.state === 'minimized');
+    // Close launcher on outside click (single listener, not inside renderAppLauncher)
+    document.addEventListener('pointerdown', (ev) => {
+        if (!uiState.launcherOpen || !launcherEl) return;
+        if (!launcherEl.contains(ev.target)) {
+            setLauncherOpen(false);
+        }
+    }, true);
 
-        if (visibleWindows.length > 0) {
+    function toggleShowDesktop() {
+        if (!uiState.showDesktop) {
+            // Minimize all visible windows, track which ones we minimized
+            const visibleWindows = state.windows.filter(w => w.state !== 'minimized');
+            if (visibleWindows.length === 0) return;
+
             uiState.restoreStates.clear();
             for (const w of visibleWindows) {
                 uiState.restoreStates.set(w.id, w.state || 'normal');
@@ -753,15 +773,14 @@ export function init(bootstrap) {
                 updateWindow(w.id, { state: 'minimized' });
             }
             uiState.showDesktop = true;
-            renderWindows();
-            return;
-        }
-
-        if (minimizedWindows.length > 0) {
-            for (const w of minimizedWindows) {
-                const prevState = uiState.restoreStates.get(w.id) || 'normal';
-                w.state = prevState;
-                updateWindow(w.id, { state: w.state });
+        } else {
+            // Only restore windows that were minimized by Show Desktop
+            for (const [id, prevState] of uiState.restoreStates) {
+                const w = state.windows.find(w => w.id === id);
+                if (w && w.state === 'minimized') {
+                    w.state = prevState;
+                    updateWindow(w.id, { state: w.state });
+                }
             }
             uiState.restoreStates.clear();
             uiState.showDesktop = false;
@@ -807,7 +826,8 @@ export function init(bootstrap) {
             rightBarEl.appendChild(userLabel);
         }
 
-        setInterval(updateAppBarMeta, 1000);
+        if (appBarMetaInterval) clearInterval(appBarMetaInterval);
+        appBarMetaInterval = setInterval(updateAppBarMeta, 1000);
         updateAppBarMeta();
     }
 
@@ -908,7 +928,19 @@ export function init(bootstrap) {
                     return;
                 }
                 uiRefs.lockInput.value = '';
-                uiRefs.lockInput.placeholder = 'Wrong password';
+                if (result && result.networkError) {
+                    uiRefs.lockInput.placeholder = 'Network error, try again';
+                } else if (result && result.status && result.status >= 500) {
+                    uiRefs.lockInput.placeholder = 'Server error, try again later';
+                } else {
+                    uiRefs.lockInput.placeholder = 'Wrong password';
+                }
+                uiRefs.lockInput.focus();
+            })
+            .catch((err) => {
+                console.error('[WM] Unlock failed', err);
+                uiRefs.lockInput.value = '';
+                uiRefs.lockInput.placeholder = 'Unlock failed, try again';
                 uiRefs.lockInput.focus();
             })
             .finally(() => {
