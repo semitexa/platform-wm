@@ -153,8 +153,11 @@ export function init(bootstrap) {
     function loadDesktopBackgroundSetting() {
         return fetch('/api/platform/settings?scope=user&module_key=platform-wm', { credentials: 'include' })
             .then((r) => {
-                if (r.status === 401 || r.status === 403) {
+                if (r.status === 401) {
                     logout();
+                    return null;
+                }
+                if (r.status === 403) {
                     return null;
                 }
                 if (!r.ok) throw new Error('Failed to load settings');
@@ -278,7 +281,7 @@ export function init(bootstrap) {
 
         // Update taskbar
         if (taskbar) {
-            taskbar.render(state.windows, stackManager.getTopWindowId(), apps);
+            taskbar.render(state.windows, stackManager.getTopWindowId(), apps, activeGroupTabs);
         }
         if (uiRefs.launcherList) {
             renderLauncherList(uiRefs.launcherSearch ? uiRefs.launcherSearch.value : '');
@@ -985,10 +988,15 @@ export function init(bootstrap) {
         if (!uiRefs.lockOverlay) return;
         uiRefs.lockOverlay.hidden = !locked;
         setDesktopInteractivityLocked(locked);
+        if (uiRefs.lockInput && !locked) {
+            uiRefs.lockInput.value = '';
+            uiRefs.lockInput.placeholder = 'Password';
+        }
         if (locked) {
             setLauncherOpen(false);
             if (uiRefs.lockInput) {
                 uiRefs.lockInput.value = '';
+                uiRefs.lockInput.placeholder = 'Password';
                 uiRefs.lockInput.focus();
             }
         }
@@ -1041,7 +1049,7 @@ export function init(bootstrap) {
 
     function updateAppBarMeta() {
         if (uiRefs.windowsStat) {
-            const openCount = state.windows.filter(w => w.state !== 'minimized').length;
+            const openCount = countVisibleWindowWrappers();
             const total = state.windows.length;
             uiRefs.windowsStat.textContent = `${openCount}/${total} visible`;
         }
@@ -1052,6 +1060,32 @@ export function init(bootstrap) {
             const now = new Date();
             uiRefs.clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
+    }
+
+    function countVisibleWindowWrappers() {
+        const groups = tabGroup.getGroups(state.windows);
+        const groupedIds = new Set();
+
+        for (const [, members] of groups) {
+            for (const member of members) {
+                groupedIds.add(member.id);
+            }
+        }
+
+        let visible = 0;
+
+        for (const window of state.windows) {
+            if (groupedIds.has(window.id)) continue;
+            if (window.state === 'minimized') continue;
+            visible += 1;
+        }
+
+        for (const [, members] of groups) {
+            if (members.every((member) => member.state === 'minimized')) continue;
+            visible += 1;
+        }
+
+        return visible;
     }
 
     // --- Init ---

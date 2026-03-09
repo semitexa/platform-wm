@@ -18,8 +18,9 @@ export class Taskbar {
      * @param {Array} windows - Current window state
      * @param {string|null} activeWindowId - Currently focused window
      * @param {Array} apps - App descriptors for icon lookup
+     * @param {Map<string, string>} activeGroupTabs - Group id to active tab window id
      */
-    render(windows, activeWindowId, apps) {
+    render(windows, activeWindowId, apps, activeGroupTabs = new Map()) {
         this._container.innerHTML = '';
         const appsById = new Map((apps || []).map((app) => [app.id, app]));
 
@@ -36,7 +37,8 @@ export class Taskbar {
             const appWindows = grouped.get(appId) || [];
             const runningCount = appWindows.length;
             const app = appsById.get(appId) || null;
-            const representative = appWindows[0] || null;
+            const cycleWindows = this._getCycleWindows(appWindows, activeGroupTabs);
+            const representative = cycleWindows[0] || appWindows[0] || null;
             if (runningCount === 0) continue;
 
             const btn = document.createElement('button');
@@ -74,16 +76,40 @@ export class Taskbar {
             }
 
             btn.addEventListener('click', () => {
-                if (runningCount === 1) {
-                    this._onActivate(appWindows[0].id);
+                if (cycleWindows.length === 1) {
+                    this._onActivate(cycleWindows[0].id);
                     return;
                 }
-                const next = this._nextWindowId(appWindows, activeWindowId);
+                const next = this._nextWindowId(cycleWindows, activeWindowId);
                 this._onActivate(next);
             });
 
             this._container.appendChild(btn);
         }
+    }
+
+    _getCycleWindows(appWindows, activeGroupTabs) {
+        const cycleWindows = [];
+        const seenGroups = new Set();
+
+        for (const window of appWindows) {
+            if (!window.groupId) {
+                cycleWindows.push(window);
+                continue;
+            }
+
+            if (seenGroups.has(window.groupId)) continue;
+            seenGroups.add(window.groupId);
+
+            const activeTabId = activeGroupTabs.get(window.groupId);
+            const representative = appWindows.find((candidate) => candidate.groupId === window.groupId && candidate.id === activeTabId)
+                || appWindows.find((candidate) => candidate.groupId === window.groupId)
+                || window;
+
+            cycleWindows.push(representative);
+        }
+
+        return cycleWindows;
     }
 
     _nextWindowId(appWindows, activeWindowId) {
