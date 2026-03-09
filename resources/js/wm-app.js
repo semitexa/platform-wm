@@ -89,6 +89,25 @@ export function init(bootstrap) {
 
     if (!container) return;
 
+    function normalizeCssUrlValue(rawValue) {
+        if (typeof rawValue !== 'string') return '';
+
+        let decoded = rawValue.trim();
+        if (decoded === '') return '';
+
+        for (let i = 0; i < 2; i++) {
+            try {
+                const next = decodeURIComponent(decoded);
+                if (next === decoded) break;
+                decoded = next;
+            } catch (_) {
+                break;
+            }
+        }
+
+        return decoded.trim();
+    }
+
     function applyDesktopBackground(value) {
         if (!desktopEl) return;
         const v = typeof value === 'string' ? value.trim() : '';
@@ -96,13 +115,34 @@ export function init(bootstrap) {
             desktopEl.style.removeProperty('background');
             return;
         }
-        // Sanitize: only allow gradients, colors, and same-origin/data URLs
+
+        const lower = v.toLowerCase();
+        if (lower.includes('expression(') || lower.includes('javascript:')) {
+            console.warn('[WM] Blocked unsafe desktop background value');
+            return;
+        }
+
         if (/url\s*\(/i.test(v)) {
             const urls = v.match(/url\s*\(\s*['"]?([^'")]+)['"]?\s*\)/gi) || [];
             for (const u of urls) {
-                const inner = u.replace(/url\s*\(\s*['"]?|['"]?\s*\)/gi, '');
-                if (!inner.startsWith('data:image/') && !inner.startsWith('/')) {
-                    console.warn('[WM] Blocked external URL in desktop background:', inner);
+                const inner = normalizeCssUrlValue(u.replace(/url\s*\(\s*['"]?|['"]?\s*\)/gi, ''));
+                const normalizedInner = inner.toLowerCase();
+
+                if (normalizedInner.startsWith('//')) {
+                    console.warn('[WM] Blocked protocol-relative URL in desktop background:', inner);
+                    return;
+                }
+
+                if (/^[a-z][a-z0-9+.-]*:/i.test(normalizedInner)) {
+                    if (!normalizedInner.startsWith('data:image/')) {
+                        console.warn('[WM] Blocked external URL in desktop background:', inner);
+                        return;
+                    }
+                    continue;
+                }
+
+                if (!normalizedInner.startsWith('/')) {
+                    console.warn('[WM] Blocked non-local URL in desktop background:', inner);
                     return;
                 }
             }
@@ -112,14 +152,19 @@ export function init(bootstrap) {
 
     function loadDesktopBackgroundSetting() {
         return fetch('/api/platform/settings?scope=user&module_key=platform-wm', { credentials: 'include' })
-            .then((r) => r.json())
+            .then((r) => {
+                if (!r.ok) throw new Error('Failed to load settings');
+                return r.json();
+            })
             .then((data) => {
                 const list = Array.isArray(data.settings) ? data.settings : [];
                 const row = list.find((s) => s && s.key === 'desktop_background');
                 if (!row) return;
                 applyDesktopBackground(row.value);
             })
-            .catch(() => {});
+            .catch((err) => {
+                console.debug('[WM] Could not load desktop background setting:', err.message);
+            });
     }
 
     // --- Tab Group ---
@@ -161,10 +206,6 @@ export function init(bootstrap) {
                 stackManager.focus(windowId);
                 renderWindows();
             }
-        },
-        onLaunch(appId) {
-            if (!apps.some(a => a.id === appId)) return;
-            openWindow(appId, {});
         },
     }) : null;
 

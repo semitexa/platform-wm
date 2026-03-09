@@ -7,12 +7,10 @@ export class Taskbar {
      * @param {HTMLElement} container - The #wm-taskbar element
      * @param {object} opts
      * @param {function(string):void} opts.onActivate - Called when taskbar item clicked
-     * @param {function(string):void} opts.onLaunch - Called when app item without windows clicked
      */
     constructor(container, opts = {}) {
         this._container = container;
         this._onActivate = opts.onActivate || (() => {});
-        this._onLaunch = opts.onLaunch || (() => {});
     }
 
     /**
@@ -31,10 +29,7 @@ export class Taskbar {
             grouped.get(key).push(w);
         }
 
-        const orderedAppIds = [];
-        for (const appId of grouped.keys()) {
-            if (!orderedAppIds.includes(appId)) orderedAppIds.push(appId);
-        }
+        const orderedAppIds = [...grouped.keys()];
 
         for (const appId of orderedAppIds) {
             const appWindows = grouped.get(appId) || [];
