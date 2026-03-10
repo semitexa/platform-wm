@@ -223,6 +223,8 @@ export function init(bootstrap) {
     // --- Window frame map (for iframe lookups) ---
     /** @type {Map<string, HTMLElement>} */
     const frameElements = new Map();
+    /** @type {Map<string, HTMLElement>} groupId → wrapper div */
+    const groupWrappers = new Map();
     // Persistent map: iframe contentWindow → windowId (survives re-renders)
     /** @type {Map<Window, string>} */
     const iframeSourceMap = new Map();
@@ -235,27 +237,31 @@ export function init(bootstrap) {
 
     function trackIframeSource(windowId, frame) {
         const iframe = frame.iframeEl || frame.querySelector('iframe');
-        // Remove stale entries for this windowId before setting new ones
-        cleanIframeSourceMap(windowId);
-        if (iframe && iframe.contentWindow) {
-            iframeSourceMap.set(iframe.contentWindow, windowId);
-        }
-        // Also track when iframe loads (cross-origin may reset contentWindow)
-        if (iframe) {
-            iframe.addEventListener('load', () => {
-                if (iframe.contentWindow) {
-                    cleanIframeSourceMap(windowId);
-                    iframeSourceMap.set(iframe.contentWindow, windowId);
+        if (!iframe) return;
+
+        const updateMap = () => {
+            if (iframe.contentWindow) {
+                // Remove any other windowIds that might have been associated with this contentWindow
+                for (const [win, id] of iframeSourceMap) {
+                    if (win === iframe.contentWindow && id !== windowId) {
+                        iframeSourceMap.delete(win);
+                    }
                 }
-            }, { once: true });
+                iframeSourceMap.set(iframe.contentWindow, windowId);
+            }
+        };
+
+        if (!iframe._wmTracked) {
+            iframe.addEventListener('load', updateMap);
+            iframe._wmTracked = true;
         }
+
+        updateMap();
     }
 
     // --- Render ---
     function renderWindows() {
         syncShowDesktopState();
-        container.innerHTML = '';
-        frameElements.clear();
         stackManager.init(state.windows);
 
         // Group windows by groupId
@@ -265,19 +271,68 @@ export function init(bootstrap) {
             for (const m of members) groupedIds.add(m.id);
         }
 
-        // Render ungrouped windows
+        const activeSingleIds = new Set();
+        for (const w of state.windows) {
+            if (!groupedIds.has(w.id) && w.state !== 'minimized') activeSingleIds.add(w.id);
+        }
+
+        const activeGroupIds = new Set();
+        for (const [groupId, members] of groups) {
+            if (members.some(m => m.state !== 'minimized')) activeGroupIds.add(groupId);
+        }
+
+        // 1. Remove elements no longer needed
+        for (const [id, frame] of frameElements) {
+            if (!activeSingleIds.has(id) && !groupedIds.has(id)) {
+                if (frame.parentNode) frame.parentNode.removeChild(frame);
+                frameElements.delete(id);
+                cleanIframeSourceMap(id);
+            }
+        }
+        for (const [groupId, wrapper] of groupWrappers) {
+            if (!activeGroupIds.has(groupId)) {
+                if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper);
+                groupWrappers.delete(groupId);
+            }
+        }
+
+        // 2. Render/Update ungrouped windows
         for (const w of state.windows) {
             if (groupedIds.has(w.id)) continue;
             if (w.state === 'minimized') continue;
-            renderSingleWindow(w);
+            
+            const frame = frameElements.get(w.id);
+            if (frame && (frame.parentNode === container || frame.parentNode === null)) {
+                frame.removeAttribute('grouped');
+                if (w.state === 'maximized') frame.setAttribute('maximized', '');
+                else frame.removeAttribute('maximized');
+                
+                if (frame.showTitlebar) frame.showTitlebar();
+                frame.style.position = 'absolute';
+                frame.style.display = 'flex';
+                frame.style.flexDirection = 'column';
+                frame.setWindow(w);
+                applyBounds(frame, w);
+                if (frame.parentNode === null) container.appendChild(frame);
+            } else {
+                renderSingleWindow(w);
+            }
         }
 
-        // Render grouped windows (one frame per group)
+        // 3. Render/Update grouped windows (one frame per group)
         for (const [groupId, members] of groups) {
-            // All minimized? skip
             if (members.every(m => m.state === 'minimized')) continue;
-            renderGroupedWindow(groupId, members);
+            
+            const wrapper = groupWrappers.get(groupId);
+            if (wrapper && (wrapper.parentNode === container || wrapper.parentNode === null)) {
+                updateGroupedWindow(groupId, members, wrapper);
+                if (wrapper.parentNode === null) container.appendChild(wrapper);
+            } else {
+                renderGroupedWindow(groupId, members);
+            }
         }
+
+        applyZIndexes();
 
         // Update taskbar
         if (taskbar) {
@@ -300,6 +355,14 @@ export function init(bootstrap) {
     function renderSingleWindow(w) {
         const frame = document.createElement('wm-window-frame');
         frame.setWindow(w);
+        frame.removeAttribute('grouped');
+        if (w.state === 'maximized') frame.setAttribute('maximized', '');
+        else frame.removeAttribute('maximized');
+        
+        if (frame.showTitlebar) frame.showTitlebar();
+        frame.style.position = 'absolute';
+        frame.style.display = 'flex';
+        frame.style.flexDirection = 'column';
         applyBounds(frame, w);
         frame.style.zIndex = String(stackManager.getZIndex(w.id));
 
@@ -309,7 +372,7 @@ export function init(bootstrap) {
             dragManager.attach(titlebar, frame, {
                 onStart() {
                     stackManager.focus(w.id);
-                    frame.style.zIndex = String(stackManager.getZIndex(w.id));
+                    applyZIndexes();
                 },
                 onEnd(pos) {
                     const bounds = { ...w.bounds, x: pos.x, y: pos.y };
@@ -357,6 +420,8 @@ export function init(bootstrap) {
 
         // Wrapper div
         const wrapper = document.createElement('div');
+        wrapper.className = 'wm-group-wrapper';
+        wrapper.dataset.maximized = String(activeWindow.state === 'maximized');
         wrapper.style.position = 'absolute';
         wrapper.style.display = 'flex';
         wrapper.style.flexDirection = 'column';
@@ -381,13 +446,14 @@ export function init(bootstrap) {
             btn.title = action.charAt(0).toUpperCase() + action.slice(1);
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                // Get current active tab ID from state because it might have changed
+                const currentActiveTabId = activeGroupTabs.get(groupId);
                 if (action === 'close') {
-                    closeWindow(activeTabId);
+                    closeWindow(currentActiveTabId);
                 } else if (action === 'minimize') {
                     for (const m of members) minimizeWindow(m.id);
                 } else if (action === 'maximize') {
-                    // Toggle maximize for all group members based on active tab's state
-                    const activeW = members.find(m => m.id === activeTabId) || members[0];
+                    const activeW = members.find(m => m.id === currentActiveTabId) || members[0];
                     const shouldMaximize = activeW.state !== 'maximized';
                     for (const m of members) {
                         if (shouldMaximize && m.state !== 'maximized') toggleMaximize(m.id);
@@ -401,37 +467,53 @@ export function init(bootstrap) {
         wrapper.appendChild(controlBar);
 
         // Tab bar — below control bar
+        const tabBarContainer = document.createElement('div');
+        tabBarContainer.className = 'wm-tab-bar-container';
         const tabBar = tabGroup.createTabBar(members, activeTabId);
-        wrapper.appendChild(tabBar);
+        tabBarContainer.appendChild(tabBar);
+        wrapper.appendChild(tabBarContainer);
 
         // Render each member's frame (only active visible)
         for (const m of members) {
-            const frame = document.createElement('wm-window-frame');
+            let frame = frameElements.get(m.id);
+            if (!frame) {
+                frame = document.createElement('wm-window-frame');
+                frameElements.set(m.id, frame);
+            }
             frame.setWindow(m);
+            frame.setAttribute('grouped', '');
             frame.hideTitlebar();
             frame.style.position = 'relative';
+            frame.style.left = '0';
+            frame.style.top = '0';
             frame.style.width = '100%';
+            frame.style.height = '100%';
             frame.style.flex = '1';
             frame.style.display = m.id === activeTabId ? 'flex' : 'none';
-            frame.style.borderRadius = '0 0 8px 8px';
+            frame.style.borderRadius = '0';
 
-            frame.addEventListener('wm-close', (e) => closeWindow(e.detail.windowId));
-            frame.addEventListener('wm-minimize', (e) => minimizeWindow(e.detail.windowId));
-            frame.addEventListener('wm-maximize', (e) => toggleMaximize(e.detail.windowId));
+            if (!frame.hasWmListeners) {
+                frame.addEventListener('wm-close', (e) => closeWindow(e.detail.windowId));
+                frame.addEventListener('wm-minimize', (e) => minimizeWindow(e.detail.windowId));
+                frame.addEventListener('wm-maximize', (e) => toggleMaximize(e.detail.windowId));
+                frame.hasWmListeners = true;
+            }
 
             wrapper.appendChild(frame);
-            frameElements.set(m.id, frame);
             trackIframeSource(m.id, frame);
         }
 
         // Drag via control bar AND tab bar
         const dragOpts = {
             onStart() {
-                stackManager.focus(activeTabId);
-                wrapper.style.zIndex = String(stackManager.getZIndex(activeTabId));
+                const currentActiveTabId = activeGroupTabs.get(groupId);
+                stackManager.focus(currentActiveTabId);
+                applyZIndexes();
             },
             onEnd(pos) {
-                const bounds = { ...activeWindow.bounds, x: pos.x, y: pos.y };
+                const currentActiveTabId = activeGroupTabs.get(groupId);
+                const activeW = members.find(m => m.id === currentActiveTabId) || members[0];
+                const bounds = { ...activeW.bounds, x: pos.x, y: pos.y };
                 // Update all members' bounds
                 for (const m of members) {
                     m.bounds = bounds;
@@ -440,7 +522,7 @@ export function init(bootstrap) {
             },
         };
         dragManager.attach(controlBar, wrapper, dragOpts);
-        dragManager.attach(tabBar, wrapper, dragOpts);
+        dragManager.attach(tabBarContainer, wrapper, dragOpts);
 
         // Resize
         resizeManager.attach(wrapper, {
@@ -453,13 +535,80 @@ export function init(bootstrap) {
         });
 
         wrapper.addEventListener('pointerdown', () => {
-            if (stackManager.getTopWindowId() !== activeTabId) {
-                stackManager.focus(activeTabId);
+            const currentActiveTabId = activeGroupTabs.get(groupId);
+            if (stackManager.getTopWindowId() !== currentActiveTabId) {
+                stackManager.focus(currentActiveTabId);
                 applyZIndexes();
             }
         });
 
         container.appendChild(wrapper);
+        groupWrappers.set(groupId, wrapper);
+    }
+
+    function updateGroupedWindow(groupId, members, wrapper) {
+        let activeTabId = activeGroupTabs.get(groupId);
+        if (!activeTabId || !members.find(m => m.id === activeTabId)) {
+            activeTabId = members[0].id;
+            activeGroupTabs.set(groupId, activeTabId);
+        }
+
+        const activeWindow = members.find(m => m.id === activeTabId) || members[0];
+
+        wrapper.dataset.maximized = String(activeWindow.state === 'maximized');
+        applyBounds(wrapper, activeWindow);
+        wrapper.style.zIndex = String(stackManager.getZIndex(activeTabId));
+
+        // Update control bar title
+        const titleSpan = wrapper.querySelector('.wm-group-controlbar__title');
+        if (titleSpan) titleSpan.textContent = activeWindow.title || activeWindow.appId;
+
+        // Update tab bar
+        const tabBarContainer = wrapper.querySelector('.wm-tab-bar-container');
+        if (tabBarContainer) {
+            tabBarContainer.innerHTML = '';
+            tabBarContainer.appendChild(tabGroup.createTabBar(members, activeTabId));
+        }
+
+        // Ensure all member frames are in the wrapper and updated
+        for (const m of members) {
+            let frame = frameElements.get(m.id);
+            if (!frame) {
+                frame = document.createElement('wm-window-frame');
+                frameElements.set(m.id, frame);
+                frame.addEventListener('wm-close', (e) => closeWindow(e.detail.windowId));
+                frame.addEventListener('wm-minimize', (e) => minimizeWindow(e.detail.windowId));
+                frame.addEventListener('wm-maximize', (e) => toggleMaximize(e.detail.windowId));
+                frame.hasWmListeners = true;
+            }
+            
+            frame.setWindow(m);
+            frame.setAttribute('grouped', '');
+            frame.removeAttribute('maximized');
+            frame.hideTitlebar();
+            frame.style.position = 'relative';
+            frame.style.left = '0';
+            frame.style.top = '0';
+            frame.style.width = '100%';
+            frame.style.height = '100%';
+            frame.style.flex = '1';
+            frame.style.display = m.id === activeTabId ? 'flex' : 'none';
+            frame.style.borderRadius = '0';
+            
+            if (frame.parentNode !== wrapper) {
+                wrapper.appendChild(frame);
+            }
+            trackIframeSource(m.id, frame);
+        }
+        
+        // Remove frames that are no longer in this group
+        const groupMemberIds = new Set(members.map(m => m.id));
+        const framesInWrapper = wrapper.querySelectorAll('wm-window-frame');
+        framesInWrapper.forEach(f => {
+            if (!groupMemberIds.has(f.windowId)) {
+                wrapper.removeChild(f);
+            }
+        });
     }
 
     function applyBounds(el, w) {
@@ -503,6 +652,8 @@ export function init(bootstrap) {
                             w.groupOrder = 0;
                         }
                     }
+                    // Make new window the active tab in its group
+                    activeGroupTabs.set(data.window.groupId, data.window.id);
                 }
                 state.windows.push(data.window);
                 stackManager.add(data.window.id);
@@ -517,9 +668,6 @@ export function init(bootstrap) {
         return deleteWindow(windowId).then(() => {
             state.windows = state.windows.filter(w => w.id !== windowId);
             stackManager.remove(windowId);
-            // Clean up iframe source tracking
-            cleanIframeSourceMap(windowId);
-            frameElements.delete(windowId);
             preMaxBounds.delete(windowId);
             renderWindows();
             return { ok: true };
@@ -578,6 +726,10 @@ export function init(bootstrap) {
                     }
                     state.windows.push(payload);
                     stackManager.add(payload.id);
+                    // If it belongs to a group, make it active
+                    if (payload.groupId) {
+                        activeGroupTabs.set(payload.groupId, payload.id);
+                    }
                     renderWindows();
                 }
                 break;
@@ -585,7 +737,6 @@ export function init(bootstrap) {
                 if (payload) {
                     state.windows = state.windows.filter(w => w.id !== payload.id);
                     stackManager.remove(payload.id);
-                    frameElements.delete(payload.id);
                     renderWindows();
                 }
                 break;
@@ -624,7 +775,11 @@ export function init(bootstrap) {
 
     // --- Message Bus ---
     const messageBus = new MessageBus({
-        onOpen: openWindow,
+        onOpen(appId, context, parentWindowId, data) {
+            // Use parentWindowId from data.windowId as fallback
+            const resolvedParentId = parentWindowId || (data ? data.windowId : null);
+            return openWindow(appId, context, resolvedParentId);
+        },
         onClose: closeWindow,
         onUpdate(windowId, updates) {
             const w = state.windows.find(w => w.id === windowId);

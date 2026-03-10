@@ -265,6 +265,8 @@ body {
 .wm-tab .tab-close:hover { opacity: 1; }
 
 /* Drag/resize overlay - blocks iframe pointer events during interaction */
+.wm-group-wrapper { background: #313244; border-radius: 8px; box-shadow: 0 4px 24px rgba(0, 0, 0, .4); overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
+.wm-group-wrapper[data-maximized="true"] { border-radius: 0; box-shadow: none; border: none; }
 .wm-interaction-overlay { position: fixed; inset: 0; z-index: 99999; cursor: inherit; }
 
 /* Group merge indicator */

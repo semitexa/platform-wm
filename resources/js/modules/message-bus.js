@@ -35,7 +35,7 @@ export class MessageBus {
         const a = data.action;
         if (a === 'wm.open' && data.appId) {
             const parentWindowId = this._resolveWindowId(ev);
-            this._onOpen(data.appId, data.context || {}, parentWindowId);
+            this._onOpen(data.appId, data.context || {}, parentWindowId, data);
         }
         if (a === 'wm.closeSelf') {
             const windowId = this._resolveWindowId(ev);
@@ -52,7 +52,7 @@ export class MessageBus {
             switch (action) {
                 case 'wm.open': {
                     const parentWindowId = this._resolveWindowId(ev);
-                    result = await this._onOpen(data.appId, data.context || {}, parentWindowId);
+                    result = await this._onOpen(data.appId, data.context || {}, parentWindowId, data);
                     break;
                 }
                 case 'wm.closeSelf': {
