@@ -1103,7 +1103,7 @@ export function init(bootstrap) {
             if (e.key !== 'Tab') return;
             const focusables = [
                 ...overlay.querySelectorAll('input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])')
-            ].filter((el) => !el.hasAttribute('disabled') && !el.getAttribute('aria-hidden'));
+            ].filter((el) => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true');
             if (focusables.length === 0) return;
 
             const first = focusables[0];
