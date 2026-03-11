@@ -3,7 +3,7 @@
  * Orchestrates all window management modules.
  */
 
-import { configure, updateWindow, createWindow, deleteWindow, getState, groupWindows, ungroupWindow, logout } from './modules/api-client.js';
+import { configure, updateWindow, createWindow, deleteWindow, getState, groupWindows, ungroupWindow, logout, unlock } from './modules/api-client.js';
 import { SseClient } from './modules/sse-client.js';
 import { StackManager } from './modules/stack-manager.js';
 import { DragManager } from './modules/drag-manager.js';
@@ -62,12 +62,118 @@ export function init(bootstrap) {
 
     // --- DOM references ---
     const container = document.getElementById('wm-windows');
+    const desktopEl = document.getElementById('wm-desktop');
     const desktopIconsEl = document.getElementById('wm-desktop-icons');
     const taskbarEl = document.getElementById('wm-taskbar');
     const launcherEl = document.getElementById('wm-app-launcher');
     const rightBarEl = document.getElementById('wm-app-bar-right');
+    const uiState = {
+        launcherOpen: false,
+        showDesktop: false,
+        restoreStates: new Map(),
+        locked: false,
+        unlocking: false,
+    };
+    let appBarMetaInterval = null;
+    const uiRefs = {
+        launcherSearch: null,
+        launcherList: null,
+        launcherToggle: null,
+        launcherPanel: null,
+        showDesktopBtn: null,
+        windowsStat: null,
+        clockEl: null,
+        lockOverlay: null,
+        lockInput: null,
+    };
 
     if (!container) return;
+
+    function normalizeCssUrlValue(rawValue) {
+        if (typeof rawValue !== 'string') return '';
+
+        let decoded = rawValue.trim();
+        if (decoded === '') return '';
+
+        for (let i = 0; i < 2; i++) {
+            try {
+                const next = decodeURIComponent(decoded);
+                if (next === decoded) break;
+                decoded = next;
+            } catch (_) {
+                break;
+            }
+        }
+
+        return decoded.trim();
+    }
+
+    function applyDesktopBackground(value) {
+        if (!desktopEl) return;
+        const v = typeof value === 'string' ? value.trim() : '';
+        if (v === '') {
+            desktopEl.style.removeProperty('background');
+            return;
+        }
+
+        const lower = v.toLowerCase();
+        if (lower.includes('expression(') || lower.includes('javascript:')) {
+            console.warn('[WM] Blocked unsafe desktop background value');
+            return;
+        }
+
+        if (/url\s*\(/i.test(v)) {
+            const urls = v.match(/url\s*\(\s*['"]?([^'")]+)['"]?\s*\)/gi) || [];
+            for (const u of urls) {
+                const inner = normalizeCssUrlValue(u.replace(/url\s*\(\s*['"]?|['"]?\s*\)/gi, ''));
+                const normalizedInner = inner.toLowerCase();
+
+                if (normalizedInner.startsWith('//')) {
+                    console.warn('[WM] Blocked protocol-relative URL in desktop background:', inner);
+                    return;
+                }
+
+                if (/^[a-z][a-z0-9+.-]*:/i.test(normalizedInner)) {
+                    if (!normalizedInner.startsWith('data:image/')) {
+                        console.warn('[WM] Blocked external URL in desktop background:', inner);
+                        return;
+                    }
+                    continue;
+                }
+
+                if (!normalizedInner.startsWith('/')) {
+                    console.warn('[WM] Blocked non-local URL in desktop background:', inner);
+                    return;
+                }
+            }
+        }
+        desktopEl.style.background = v;
+    }
+
+    function loadDesktopBackgroundSetting() {
+        return fetch('/api/platform/settings?scope=user&module_key=platform-wm', { credentials: 'include' })
+            .then((r) => {
+                if (r.status === 401) {
+                    logout();
+                    return null;
+                }
+                if (r.status === 403) {
+                    return null;
+                }
+                if (!r.ok) throw new Error('Failed to load settings');
+                return r.json();
+            })
+            .then((data) => {
+                if (!data) return;
+                const list = Array.isArray(data.settings) ? data.settings : [];
+                const row = list.find((s) => s && s.key === 'desktop_background');
+                if (!row) return;
+                applyDesktopBackground(row.value);
+            })
+            .catch((err) => {
+                console.debug('[WM] Could not load desktop background setting:', err.message);
+            });
+    }
 
     // --- Tab Group ---
     const tabGroup = new TabGroup({
@@ -108,7 +214,7 @@ export function init(bootstrap) {
                 stackManager.focus(windowId);
                 renderWindows();
             }
-        }
+        },
     }) : null;
 
     // --- Desktop Icons ---
@@ -117,6 +223,8 @@ export function init(bootstrap) {
     // --- Window frame map (for iframe lookups) ---
     /** @type {Map<string, HTMLElement>} */
     const frameElements = new Map();
+    /** @type {Map<string, HTMLElement>} groupId → wrapper div */
+    const groupWrappers = new Map();
     // Persistent map: iframe contentWindow → windowId (survives re-renders)
     /** @type {Map<Window, string>} */
     const iframeSourceMap = new Map();
@@ -129,26 +237,31 @@ export function init(bootstrap) {
 
     function trackIframeSource(windowId, frame) {
         const iframe = frame.iframeEl || frame.querySelector('iframe');
-        // Remove stale entries for this windowId before setting new ones
-        cleanIframeSourceMap(windowId);
-        if (iframe && iframe.contentWindow) {
-            iframeSourceMap.set(iframe.contentWindow, windowId);
-        }
-        // Also track when iframe loads (cross-origin may reset contentWindow)
-        if (iframe) {
-            iframe.addEventListener('load', () => {
-                if (iframe.contentWindow) {
-                    cleanIframeSourceMap(windowId);
-                    iframeSourceMap.set(iframe.contentWindow, windowId);
+        if (!iframe) return;
+
+        const updateMap = () => {
+            if (iframe.contentWindow) {
+                // Remove any other windowIds that might have been associated with this contentWindow
+                for (const [win, id] of iframeSourceMap) {
+                    if (win === iframe.contentWindow && id !== windowId) {
+                        iframeSourceMap.delete(win);
+                    }
                 }
-            }, { once: true });
+                iframeSourceMap.set(iframe.contentWindow, windowId);
+            }
+        };
+
+        if (!iframe._wmTracked) {
+            iframe.addEventListener('load', updateMap);
+            iframe._wmTracked = true;
         }
+
+        updateMap();
     }
 
     // --- Render ---
     function renderWindows() {
-        container.innerHTML = '';
-        frameElements.clear();
+        syncShowDesktopState();
         stackManager.init(state.windows);
 
         // Group windows by groupId
@@ -158,29 +271,98 @@ export function init(bootstrap) {
             for (const m of members) groupedIds.add(m.id);
         }
 
-        // Render ungrouped windows
+        const activeSingleIds = new Set();
+        for (const w of state.windows) {
+            if (!groupedIds.has(w.id) && w.state !== 'minimized') activeSingleIds.add(w.id);
+        }
+
+        const activeGroupIds = new Set();
+        for (const [groupId, members] of groups) {
+            if (members.some(m => m.state !== 'minimized')) activeGroupIds.add(groupId);
+        }
+
+        // 1. Remove elements no longer needed
+        for (const [id, frame] of frameElements) {
+            if (!activeSingleIds.has(id) && !groupedIds.has(id)) {
+                if (frame.parentNode) frame.parentNode.removeChild(frame);
+                frameElements.delete(id);
+                cleanIframeSourceMap(id);
+            }
+        }
+        for (const [groupId, wrapper] of groupWrappers) {
+            if (!activeGroupIds.has(groupId)) {
+                if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper);
+                groupWrappers.delete(groupId);
+            }
+        }
+
+        // 2. Render/Update ungrouped windows
         for (const w of state.windows) {
             if (groupedIds.has(w.id)) continue;
             if (w.state === 'minimized') continue;
-            renderSingleWindow(w);
+            
+            const frame = frameElements.get(w.id);
+            if (frame && (frame.parentNode === container || frame.parentNode === null)) {
+                frame.removeAttribute('grouped');
+                if (w.state === 'maximized') frame.setAttribute('maximized', '');
+                else frame.removeAttribute('maximized');
+                
+                if (frame.showTitlebar) frame.showTitlebar();
+                frame.style.position = 'absolute';
+                frame.style.display = 'flex';
+                frame.style.flexDirection = 'column';
+                frame.setWindow(w);
+                applyBounds(frame, w);
+                if (frame.parentNode === null) container.appendChild(frame);
+            } else {
+                renderSingleWindow(w);
+            }
         }
 
-        // Render grouped windows (one frame per group)
+        // 3. Render/Update grouped windows (one frame per group)
         for (const [groupId, members] of groups) {
-            // All minimized? skip
             if (members.every(m => m.state === 'minimized')) continue;
-            renderGroupedWindow(groupId, members);
+            
+            const wrapper = groupWrappers.get(groupId);
+            if (wrapper && (wrapper.parentNode === container || wrapper.parentNode === null)) {
+                updateGroupedWindow(groupId, members, wrapper);
+                if (wrapper.parentNode === null) container.appendChild(wrapper);
+            } else {
+                renderGroupedWindow(groupId, members);
+            }
         }
+
+        applyZIndexes();
 
         // Update taskbar
         if (taskbar) {
-            taskbar.render(state.windows, stackManager.getTopWindowId(), apps);
+            taskbar.render(state.windows, stackManager.getTopWindowId(), apps, activeGroupTabs);
+        }
+        if (uiRefs.launcherList) {
+            renderLauncherList(uiRefs.launcherSearch ? uiRefs.launcherSearch.value : '');
+        }
+        updateAppBarMeta();
+    }
+
+    function syncShowDesktopState() {
+        if (!uiState.showDesktop) return;
+        if (state.windows.some((w) => w.state !== 'minimized')) {
+            uiState.showDesktop = false;
+            uiState.restoreStates.clear();
         }
     }
 
     function renderSingleWindow(w) {
         const frame = document.createElement('wm-window-frame');
         frame.setWindow(w);
+        frame.removeAttribute('grouped');
+        if (w.state === 'maximized') frame.setAttribute('maximized', '');
+        else frame.removeAttribute('maximized');
+        
+        if (frame.showTitlebar) frame.showTitlebar();
+        frame.style.position = 'absolute';
+        frame.style.display = 'flex';
+        frame.style.flexDirection = 'column';
         applyBounds(frame, w);
         frame.style.zIndex = String(stackManager.getZIndex(w.id));
 
@@ -190,7 +372,7 @@ export function init(bootstrap) {
             dragManager.attach(titlebar, frame, {
                 onStart() {
                     stackManager.focus(w.id);
-                    frame.style.zIndex = String(stackManager.getZIndex(w.id));
+                    applyZIndexes();
                 },
                 onEnd(pos) {
                     const bounds = { ...w.bounds, x: pos.x, y: pos.y };
@@ -238,6 +420,8 @@ export function init(bootstrap) {
 
         // Wrapper div
         const wrapper = document.createElement('div');
+        wrapper.className = 'wm-group-wrapper';
+        wrapper.dataset.maximized = String(activeWindow.state === 'maximized');
         wrapper.style.position = 'absolute';
         wrapper.style.display = 'flex';
         wrapper.style.flexDirection = 'column';
@@ -262,13 +446,14 @@ export function init(bootstrap) {
             btn.title = action.charAt(0).toUpperCase() + action.slice(1);
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                // Get current active tab ID from state because it might have changed
+                const currentActiveTabId = activeGroupTabs.get(groupId);
                 if (action === 'close') {
-                    closeWindow(activeTabId);
+                    closeWindow(currentActiveTabId);
                 } else if (action === 'minimize') {
                     for (const m of members) minimizeWindow(m.id);
                 } else if (action === 'maximize') {
-                    // Toggle maximize for all group members based on active tab's state
-                    const activeW = members.find(m => m.id === activeTabId) || members[0];
+                    const activeW = members.find(m => m.id === currentActiveTabId) || members[0];
                     const shouldMaximize = activeW.state !== 'maximized';
                     for (const m of members) {
                         if (shouldMaximize && m.state !== 'maximized') toggleMaximize(m.id);
@@ -282,37 +467,53 @@ export function init(bootstrap) {
         wrapper.appendChild(controlBar);
 
         // Tab bar — below control bar
+        const tabBarContainer = document.createElement('div');
+        tabBarContainer.className = 'wm-tab-bar-container';
         const tabBar = tabGroup.createTabBar(members, activeTabId);
-        wrapper.appendChild(tabBar);
+        tabBarContainer.appendChild(tabBar);
+        wrapper.appendChild(tabBarContainer);
 
         // Render each member's frame (only active visible)
         for (const m of members) {
-            const frame = document.createElement('wm-window-frame');
+            let frame = frameElements.get(m.id);
+            if (!frame) {
+                frame = document.createElement('wm-window-frame');
+                frameElements.set(m.id, frame);
+            }
             frame.setWindow(m);
+            frame.setAttribute('grouped', '');
             frame.hideTitlebar();
             frame.style.position = 'relative';
+            frame.style.left = '0';
+            frame.style.top = '0';
             frame.style.width = '100%';
+            frame.style.height = '100%';
             frame.style.flex = '1';
             frame.style.display = m.id === activeTabId ? 'flex' : 'none';
-            frame.style.borderRadius = '0 0 8px 8px';
+            frame.style.borderRadius = '0';
 
-            frame.addEventListener('wm-close', (e) => closeWindow(e.detail.windowId));
-            frame.addEventListener('wm-minimize', (e) => minimizeWindow(e.detail.windowId));
-            frame.addEventListener('wm-maximize', (e) => toggleMaximize(e.detail.windowId));
+            if (!frame.hasWmListeners) {
+                frame.addEventListener('wm-close', (e) => closeWindow(e.detail.windowId));
+                frame.addEventListener('wm-minimize', (e) => minimizeWindow(e.detail.windowId));
+                frame.addEventListener('wm-maximize', (e) => toggleMaximize(e.detail.windowId));
+                frame.hasWmListeners = true;
+            }
 
             wrapper.appendChild(frame);
-            frameElements.set(m.id, frame);
             trackIframeSource(m.id, frame);
         }
 
         // Drag via control bar AND tab bar
         const dragOpts = {
             onStart() {
-                stackManager.focus(activeTabId);
-                wrapper.style.zIndex = String(stackManager.getZIndex(activeTabId));
+                const currentActiveTabId = activeGroupTabs.get(groupId);
+                stackManager.focus(currentActiveTabId);
+                applyZIndexes();
             },
             onEnd(pos) {
-                const bounds = { ...activeWindow.bounds, x: pos.x, y: pos.y };
+                const currentActiveTabId = activeGroupTabs.get(groupId);
+                const activeW = members.find(m => m.id === currentActiveTabId) || members[0];
+                const bounds = { ...activeW.bounds, x: pos.x, y: pos.y };
                 // Update all members' bounds
                 for (const m of members) {
                     m.bounds = bounds;
@@ -321,7 +522,7 @@ export function init(bootstrap) {
             },
         };
         dragManager.attach(controlBar, wrapper, dragOpts);
-        dragManager.attach(tabBar, wrapper, dragOpts);
+        dragManager.attach(tabBarContainer, wrapper, dragOpts);
 
         // Resize
         resizeManager.attach(wrapper, {
@@ -334,13 +535,80 @@ export function init(bootstrap) {
         });
 
         wrapper.addEventListener('pointerdown', () => {
-            if (stackManager.getTopWindowId() !== activeTabId) {
-                stackManager.focus(activeTabId);
+            const currentActiveTabId = activeGroupTabs.get(groupId);
+            if (stackManager.getTopWindowId() !== currentActiveTabId) {
+                stackManager.focus(currentActiveTabId);
                 applyZIndexes();
             }
         });
 
         container.appendChild(wrapper);
+        groupWrappers.set(groupId, wrapper);
+    }
+
+    function updateGroupedWindow(groupId, members, wrapper) {
+        let activeTabId = activeGroupTabs.get(groupId);
+        if (!activeTabId || !members.find(m => m.id === activeTabId)) {
+            activeTabId = members[0].id;
+            activeGroupTabs.set(groupId, activeTabId);
+        }
+
+        const activeWindow = members.find(m => m.id === activeTabId) || members[0];
+
+        wrapper.dataset.maximized = String(activeWindow.state === 'maximized');
+        applyBounds(wrapper, activeWindow);
+        wrapper.style.zIndex = String(stackManager.getZIndex(activeTabId));
+
+        // Update control bar title
+        const titleSpan = wrapper.querySelector('.wm-group-controlbar__title');
+        if (titleSpan) titleSpan.textContent = activeWindow.title || activeWindow.appId;
+
+        // Update tab bar
+        const tabBarContainer = wrapper.querySelector('.wm-tab-bar-container');
+        if (tabBarContainer) {
+            tabBarContainer.innerHTML = '';
+            tabBarContainer.appendChild(tabGroup.createTabBar(members, activeTabId));
+        }
+
+        // Ensure all member frames are in the wrapper and updated
+        for (const m of members) {
+            let frame = frameElements.get(m.id);
+            if (!frame) {
+                frame = document.createElement('wm-window-frame');
+                frameElements.set(m.id, frame);
+                frame.addEventListener('wm-close', (e) => closeWindow(e.detail.windowId));
+                frame.addEventListener('wm-minimize', (e) => minimizeWindow(e.detail.windowId));
+                frame.addEventListener('wm-maximize', (e) => toggleMaximize(e.detail.windowId));
+                frame.hasWmListeners = true;
+            }
+            
+            frame.setWindow(m);
+            frame.setAttribute('grouped', '');
+            frame.removeAttribute('maximized');
+            frame.hideTitlebar();
+            frame.style.position = 'relative';
+            frame.style.left = '0';
+            frame.style.top = '0';
+            frame.style.width = '100%';
+            frame.style.height = '100%';
+            frame.style.flex = '1';
+            frame.style.display = m.id === activeTabId ? 'flex' : 'none';
+            frame.style.borderRadius = '0';
+            
+            if (frame.parentNode !== wrapper) {
+                wrapper.appendChild(frame);
+            }
+            trackIframeSource(m.id, frame);
+        }
+        
+        // Remove frames that are no longer in this group
+        const groupMemberIds = new Set(members.map(m => m.id));
+        const framesInWrapper = wrapper.querySelectorAll('wm-window-frame');
+        framesInWrapper.forEach(f => {
+            if (!groupMemberIds.has(f.windowId)) {
+                wrapper.removeChild(f);
+            }
+        });
     }
 
     function applyBounds(el, w) {
@@ -349,7 +617,7 @@ export function init(bootstrap) {
             el.style.left = '0';
             el.style.top = '0';
             el.style.width = '100vw';
-            el.style.height = 'calc(100vh - 48px)';
+            el.style.height = 'calc(100vh - var(--wm-appbar-height, 56px))';
         } else {
             const vw = container.clientWidth;
             const vh = container.clientHeight;
@@ -384,6 +652,8 @@ export function init(bootstrap) {
                             w.groupOrder = 0;
                         }
                     }
+                    // Make new window the active tab in its group
+                    activeGroupTabs.set(data.window.groupId, data.window.id);
                 }
                 state.windows.push(data.window);
                 stackManager.add(data.window.id);
@@ -398,9 +668,6 @@ export function init(bootstrap) {
         return deleteWindow(windowId).then(() => {
             state.windows = state.windows.filter(w => w.id !== windowId);
             stackManager.remove(windowId);
-            // Clean up iframe source tracking
-            cleanIframeSourceMap(windowId);
-            frameElements.delete(windowId);
             preMaxBounds.delete(windowId);
             renderWindows();
             return { ok: true };
@@ -459,6 +726,10 @@ export function init(bootstrap) {
                     }
                     state.windows.push(payload);
                     stackManager.add(payload.id);
+                    // If it belongs to a group, make it active
+                    if (payload.groupId) {
+                        activeGroupTabs.set(payload.groupId, payload.id);
+                    }
                     renderWindows();
                 }
                 break;
@@ -466,7 +737,6 @@ export function init(bootstrap) {
                 if (payload) {
                     state.windows = state.windows.filter(w => w.id !== payload.id);
                     stackManager.remove(payload.id);
-                    frameElements.delete(payload.id);
                     renderWindows();
                 }
                 break;
@@ -505,7 +775,11 @@ export function init(bootstrap) {
 
     // --- Message Bus ---
     const messageBus = new MessageBus({
-        onOpen: openWindow,
+        onOpen(appId, context, parentWindowId, data) {
+            // Use parentWindowId from data.windowId as fallback
+            const resolvedParentId = parentWindowId || (data ? data.windowId : null);
+            return openWindow(appId, context, resolvedParentId);
+        },
         onClose: closeWindow,
         onUpdate(windowId, updates) {
             const w = state.windows.find(w => w.id === windowId);
@@ -543,34 +817,430 @@ export function init(bootstrap) {
     }
 
     // --- Render app launcher ---
+    function setLauncherOpen(open) {
+        uiState.launcherOpen = open;
+        if (uiRefs.launcherPanel) {
+            uiRefs.launcherPanel.hidden = !open;
+        }
+        if (uiRefs.launcherToggle) {
+            uiRefs.launcherToggle.classList.toggle('active', open);
+            uiRefs.launcherToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        if (open && uiRefs.launcherSearch) {
+            uiRefs.launcherSearch.focus();
+            uiRefs.launcherSearch.select();
+        }
+    }
+
+    function renderLauncherList(filterText = '') {
+        if (!uiRefs.launcherList) return;
+        uiRefs.launcherList.innerHTML = '';
+
+        const q = (filterText || '').trim().toLowerCase();
+        const filtered = apps.filter((app) => {
+            if (q === '') return true;
+            return app.title.toLowerCase().includes(q) || app.id.toLowerCase().includes(q);
+        });
+
+        // Precompute running counts to avoid O(apps*windows)
+        const runningCounts = new Map();
+        for (const w of state.windows) {
+            runningCounts.set(w.appId, (runningCounts.get(w.appId) || 0) + 1);
+        }
+
+        for (const app of filtered) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'wm-launcher__app';
+
+            const icon = document.createElement('span');
+            icon.className = 'wm-launcher__app-icon';
+            icon.textContent = app.icon || app.title.charAt(0).toUpperCase();
+            item.appendChild(icon);
+
+            const meta = document.createElement('span');
+            meta.className = 'wm-launcher__app-meta';
+
+            const title = document.createElement('span');
+            title.className = 'wm-launcher__app-title';
+            title.textContent = app.title;
+            meta.appendChild(title);
+
+            const detail = document.createElement('span');
+            detail.className = 'wm-launcher__app-detail';
+            const running = runningCounts.get(app.id) || 0;
+            detail.textContent = running > 0 ? `${running} running` : app.id;
+            meta.appendChild(detail);
+
+            item.appendChild(meta);
+
+            item.addEventListener('click', () => {
+                openWindow(app.id, {});
+                setLauncherOpen(false);
+            });
+
+            uiRefs.launcherList.appendChild(item);
+        }
+
+        if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'wm-launcher__empty';
+            empty.textContent = 'No apps found';
+            uiRefs.launcherList.appendChild(empty);
+        }
+    }
+
     function renderAppLauncher() {
         if (!launcherEl) return;
         launcherEl.innerHTML = '';
-        for (const app of apps) {
-            const btn = document.createElement('button');
-            btn.textContent = app.title;
-            btn.className = 'wm-app-launcher__btn';
-            btn.addEventListener('click', () => openWindow(app.id, {}));
-            launcherEl.appendChild(btn);
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'wm-launcher__toggle';
+        toggle.textContent = 'Semitexa';
+        toggle.title = 'Open launcher (Ctrl+K)';
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.addEventListener('click', () => setLauncherOpen(!uiState.launcherOpen));
+
+        const panel = document.createElement('div');
+        panel.className = 'wm-launcher__panel';
+        panel.hidden = true;
+
+        const search = document.createElement('input');
+        search.className = 'wm-launcher__search';
+        search.placeholder = 'Search apps...';
+        search.addEventListener('input', () => renderLauncherList(search.value));
+        panel.appendChild(search);
+
+        const list = document.createElement('div');
+        list.className = 'wm-launcher__list';
+        panel.appendChild(list);
+
+        const account = document.createElement('div');
+        account.className = 'wm-launcher__account';
+
+        const accountTitle = document.createElement('div');
+        accountTitle.className = 'wm-launcher__account-title';
+        accountTitle.textContent = user && user.id ? `Account: ${user.id}` : 'Account';
+        account.appendChild(accountTitle);
+
+        const accountActions = document.createElement('div');
+        accountActions.className = 'wm-launcher__account-actions';
+
+        const lockBtn = document.createElement('button');
+        lockBtn.type = 'button';
+        lockBtn.className = 'wm-launcher__account-btn';
+        lockBtn.textContent = 'Lock Screen';
+        lockBtn.addEventListener('click', () => {
+            lockScreen();
+            setLauncherOpen(false);
+        });
+        accountActions.appendChild(lockBtn);
+
+        const switchBtn = document.createElement('button');
+        switchBtn.type = 'button';
+        switchBtn.className = 'wm-launcher__account-btn';
+        switchBtn.textContent = 'Switch User';
+        switchBtn.addEventListener('click', () => logout());
+        accountActions.appendChild(switchBtn);
+
+        const logoutBtn = document.createElement('button');
+        logoutBtn.type = 'button';
+        logoutBtn.className = 'wm-launcher__account-btn danger';
+        logoutBtn.textContent = 'Logout';
+        logoutBtn.addEventListener('click', () => logout());
+        accountActions.appendChild(logoutBtn);
+
+        account.appendChild(accountActions);
+        panel.appendChild(account);
+
+        launcherEl.appendChild(toggle);
+        launcherEl.appendChild(panel);
+
+        uiRefs.launcherToggle = toggle;
+        uiRefs.launcherPanel = panel;
+        uiRefs.launcherSearch = search;
+        uiRefs.launcherList = list;
+
+        renderLauncherList();
+    }
+
+    // Close launcher on outside click (single listener, not inside renderAppLauncher)
+    document.addEventListener('pointerdown', (ev) => {
+        if (!uiState.launcherOpen || !launcherEl) return;
+        if (!launcherEl.contains(ev.target)) {
+            setLauncherOpen(false);
         }
+    }, true);
+
+    function toggleShowDesktop() {
+        if (!uiState.showDesktop) {
+            // Minimize all visible windows, track which ones we minimized
+            const visibleWindows = state.windows.filter(w => w.state !== 'minimized');
+            if (visibleWindows.length === 0) return;
+
+            uiState.restoreStates.clear();
+            for (const w of visibleWindows) {
+                uiState.restoreStates.set(w.id, w.state || 'normal');
+                w.state = 'minimized';
+                updateWindow(w.id, { state: 'minimized' });
+            }
+            uiState.showDesktop = true;
+        } else {
+            // Only restore windows that were minimized by Show Desktop
+            for (const [id, prevState] of uiState.restoreStates) {
+                const w = state.windows.find(w => w.id === id);
+                if (w && w.state === 'minimized') {
+                    w.state = prevState;
+                    updateWindow(w.id, { state: w.state });
+                }
+            }
+            uiState.restoreStates.clear();
+            uiState.showDesktop = false;
+        }
+        renderWindows();
+    }
+
+    function getUserLabel() {
+        if (!user) return '';
+        if (user.name && String(user.name).trim() !== '') return String(user.name);
+        if (user.email && String(user.email).trim() !== '') return String(user.email);
+        return '';
     }
 
     function renderAppBarRight() {
         if (!rightBarEl) return;
         rightBarEl.innerHTML = '';
 
-        if (user && user.id) {
+        const windowsStat = document.createElement('span');
+        windowsStat.className = 'wm-app-bar__meta';
+        rightBarEl.appendChild(windowsStat);
+        uiRefs.windowsStat = windowsStat;
+
+        const clock = document.createElement('span');
+        clock.className = 'wm-app-bar__clock';
+        rightBarEl.appendChild(clock);
+        uiRefs.clockEl = clock;
+
+        const showDesktopBtn = document.createElement('button');
+        showDesktopBtn.type = 'button';
+        showDesktopBtn.className = 'wm-app-bar__utility';
+        showDesktopBtn.textContent = 'Show Desktop';
+        showDesktopBtn.title = 'Minimize/restore all windows';
+        showDesktopBtn.addEventListener('click', toggleShowDesktop);
+        rightBarEl.appendChild(showDesktopBtn);
+        uiRefs.showDesktopBtn = showDesktopBtn;
+
+        const userLabelText = getUserLabel();
+        if (userLabelText !== '') {
             const userLabel = document.createElement('span');
             userLabel.className = 'wm-app-bar__user';
-            userLabel.textContent = user.id;
+            userLabel.textContent = userLabelText;
             rightBarEl.appendChild(userLabel);
         }
 
-        const logoutBtn = document.createElement('button');
-        logoutBtn.textContent = 'Logout';
-        logoutBtn.className = 'wm-app-bar__logout';
-        logoutBtn.addEventListener('click', logout);
-        rightBarEl.appendChild(logoutBtn);
+        if (appBarMetaInterval) clearInterval(appBarMetaInterval);
+        appBarMetaInterval = setInterval(updateAppBarMeta, 1000);
+        updateAppBarMeta();
+    }
+
+    function ensureLockOverlay() {
+        if (uiRefs.lockOverlay) return;
+        if (!desktopEl) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'wm-lock-overlay';
+        overlay.hidden = true;
+
+        const card = document.createElement('div');
+        card.className = 'wm-lock-card';
+
+        const title = document.createElement('h2');
+        title.className = 'wm-lock-title';
+        title.textContent = 'Screen Locked';
+        card.appendChild(title);
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'wm-lock-subtitle';
+        subtitle.textContent = user && user.id ? `User: ${user.id}. Enter current account password.` : 'Enter current account password';
+        card.appendChild(subtitle);
+
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.className = 'wm-lock-input';
+        input.placeholder = 'Password';
+        card.appendChild(input);
+
+        const actions = document.createElement('div');
+        actions.className = 'wm-lock-actions';
+
+        const unlockBtn = document.createElement('button');
+        unlockBtn.type = 'button';
+        unlockBtn.className = 'wm-lock-btn';
+        unlockBtn.textContent = 'Unlock';
+        unlockBtn.addEventListener('click', () => tryUnlock());
+        actions.appendChild(unlockBtn);
+
+        const switchBtn = document.createElement('button');
+        switchBtn.type = 'button';
+        switchBtn.className = 'wm-lock-btn secondary';
+        switchBtn.textContent = 'Switch User';
+        switchBtn.addEventListener('click', () => logout());
+        actions.appendChild(switchBtn);
+
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        desktopEl.appendChild(overlay);
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                tryUnlock();
+            }
+        });
+
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab') return;
+            const focusables = [
+                ...overlay.querySelectorAll('input, button, [href], select, textarea, [tabindex]:not([tabindex="-1"])')
+            ].filter((el) => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true');
+            if (focusables.length === 0) return;
+
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement;
+
+            if (e.shiftKey && active === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && active === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        });
+
+        uiRefs.lockOverlay = overlay;
+        uiRefs.lockInput = input;
+    }
+
+    function setDesktopInteractivityLocked(locked) {
+        if (!desktopEl || !uiRefs.lockOverlay) return;
+        for (const child of desktopEl.children) {
+            if (child === uiRefs.lockOverlay) continue;
+            if (locked) {
+                child.setAttribute('inert', '');
+                child.setAttribute('aria-hidden', 'true');
+            } else {
+                child.removeAttribute('inert');
+                child.removeAttribute('aria-hidden');
+            }
+        }
+    }
+
+    function setLocked(locked) {
+        ensureLockOverlay();
+        uiState.locked = locked;
+        if (!uiRefs.lockOverlay) return;
+        uiRefs.lockOverlay.hidden = !locked;
+        setDesktopInteractivityLocked(locked);
+        if (uiRefs.lockInput && !locked) {
+            uiRefs.lockInput.value = '';
+            uiRefs.lockInput.placeholder = 'Password';
+        }
+        if (locked) {
+            setLauncherOpen(false);
+            if (uiRefs.lockInput) {
+                uiRefs.lockInput.value = '';
+                uiRefs.lockInput.placeholder = 'Password';
+                uiRefs.lockInput.focus();
+            }
+        }
+    }
+
+    function lockScreen() {
+        setLocked(true);
+    }
+
+    function tryUnlock() {
+        if (!uiRefs.lockInput || uiState.unlocking) return;
+        const password = uiRefs.lockInput.value || '';
+        if (password.length === 0) {
+            uiRefs.lockInput.placeholder = 'Enter password';
+            uiRefs.lockInput.focus();
+            return;
+        }
+
+        uiState.unlocking = true;
+        unlock(password)
+            .then((result) => {
+                if (result && result.success) {
+                    setLocked(false);
+                    return;
+                }
+                if (result && result.unauthorized) {
+                    logout();
+                    return;
+                }
+                uiRefs.lockInput.value = '';
+                if (result && result.networkError) {
+                    uiRefs.lockInput.placeholder = 'Network error, try again';
+                } else if (result && result.status && result.status >= 500) {
+                    uiRefs.lockInput.placeholder = 'Server error, try again later';
+                } else {
+                    uiRefs.lockInput.placeholder = 'Wrong password';
+                }
+                uiRefs.lockInput.focus();
+            })
+            .catch((err) => {
+                console.error('[WM] Unlock failed', err);
+                uiRefs.lockInput.value = '';
+                uiRefs.lockInput.placeholder = 'Unlock failed, try again';
+                uiRefs.lockInput.focus();
+            })
+            .finally(() => {
+                uiState.unlocking = false;
+            });
+    }
+
+    function updateAppBarMeta() {
+        if (uiRefs.windowsStat) {
+            const openCount = countVisibleWindowWrappers();
+            const total = state.windows.length;
+            uiRefs.windowsStat.textContent = `${openCount}/${total} visible`;
+        }
+        if (uiRefs.showDesktopBtn) {
+            uiRefs.showDesktopBtn.classList.toggle('active', uiState.showDesktop);
+        }
+        if (uiRefs.clockEl) {
+            const now = new Date();
+            uiRefs.clockEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+    }
+
+    function countVisibleWindowWrappers() {
+        const groups = tabGroup.getGroups(state.windows);
+        const groupedIds = new Set();
+
+        for (const [, members] of groups) {
+            for (const member of members) {
+                groupedIds.add(member.id);
+            }
+        }
+
+        let visible = 0;
+
+        for (const window of state.windows) {
+            if (groupedIds.has(window.id)) continue;
+            if (window.state === 'minimized') continue;
+            visible += 1;
+        }
+
+        for (const [, members] of groups) {
+            if (members.every((member) => member.state === 'minimized')) continue;
+            visible += 1;
+        }
+
+        return visible;
     }
 
     // --- Init ---
@@ -578,6 +1248,29 @@ export function init(bootstrap) {
     renderWindows();
     renderAppLauncher();
     renderAppBarRight();
+    ensureLockOverlay();
+    loadDesktopBackgroundSetting();
+
+    window.addEventListener('keydown', (e) => {
+        if (uiState.locked) {
+            const target = e.target instanceof Node ? e.target : null;
+            if (!uiRefs.lockOverlay || !target || !uiRefs.lockOverlay.contains(target)) {
+                e.preventDefault();
+            }
+            return;
+        }
+        const key = e.key.toLowerCase();
+        if ((e.ctrlKey || e.metaKey) && key === 'k') {
+            e.preventDefault();
+            setLauncherOpen(!uiState.launcherOpen);
+            renderLauncherList(uiRefs.launcherSearch ? uiRefs.launcherSearch.value : '');
+            return;
+        }
+        if (e.key === 'Escape' && uiState.launcherOpen) {
+            e.preventDefault();
+            setLauncherOpen(false);
+        }
+    });
 
     // --- Global exports for backward compat ---
     window.__WM_OPEN__ = openWindow;

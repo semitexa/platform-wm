@@ -23,10 +23,19 @@ export function defineWindowFrame(apps, buildAppUrl) {
         }
 
         setWindow(data) {
+            const oldId = this._windowId;
+            const oldAppId = this._app ? this._app.id : null;
+
             this._windowId = data.id;
-            this._app = apps.find(a => a.id === data.appId) || { entryUrl: '/', title: data.title };
+            this._app = apps.find(a => a.id === data.appId) || { id: data.appId, entryUrl: '/', title: data.title };
             this._context = data.context || {};
             this._title = data.title || (this._app && this._app.title) || this._windowId;
+
+            if (oldId === this._windowId && oldAppId === this._app.id) {
+                this.setTitle(this._title);
+                return;
+            }
+
             this._render();
         }
 
@@ -69,6 +78,13 @@ export function defineWindowFrame(apps, buildAppUrl) {
         hideTitlebar() {
             const tb = this.shadowRoot.querySelector('.titlebar');
             if (tb) tb.style.display = 'none';
+            const content = this.shadowRoot.querySelector('.content');
+            if (content) content.style.borderRadius = '8px';
+        }
+
+        showTitlebar() {
+            const tb = this.shadowRoot.querySelector('.titlebar');
+            if (tb) tb.style.display = 'flex';
             const content = this.shadowRoot.querySelector('.content');
             if (content) content.style.borderRadius = '0 0 8px 8px';
         }

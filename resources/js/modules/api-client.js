@@ -57,3 +57,19 @@ export function logout() {
         window.location.href = '/platform/login';
     });
 }
+
+export function unlock(password) {
+    return fetch('/api/platform/user/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+    }).then((r) => {
+        if (r.status === 401) {
+            return { success: false, unauthorized: true };
+        }
+        if (!r.ok) {
+            return { success: false, status: r.status };
+        }
+        return r.json().catch(() => ({ success: false }));
+    }).catch(() => ({ success: false, networkError: true }));
+}
