@@ -6,12 +6,11 @@ namespace Semitexa\Platform\Wm\Application\Payload\Request;
 
 use Semitexa\Core\Attributes\AsPayload;
 use Semitexa\Core\Attributes\RequiresAuth;
-use Semitexa\Core\Contract\PayloadInterface;
 use Semitexa\Core\Http\Response\GenericResponse;
 
 #[AsPayload(path: '/api/platform/wm/windows/group', methods: ['POST'], responseWith: GenericResponse::class)]
 #[RequiresAuth]
-class WmWindowGroupPayload implements PayloadInterface
+class WmWindowGroupPayload
 {
     /** @var list<string> */
     public array $windowIds = [];
