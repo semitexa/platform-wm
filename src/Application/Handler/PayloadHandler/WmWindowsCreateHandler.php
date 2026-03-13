@@ -6,26 +6,26 @@ namespace Semitexa\Platform\Wm\Application\Handler\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Attributes\InjectAsReadonly;
-use Semitexa\Core\Contract\HandlerInterface;
-use Semitexa\Core\Contract\PayloadInterface;
-use Semitexa\Core\Contract\ResourceInterface;
-use Semitexa\Core\Response;
+use Semitexa\Core\Contract\TypedHandlerInterface;
+use Semitexa\Core\Exception\ValidationException;
+use Semitexa\Core\Http\Response\GenericResponse;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Platform\Wm\Application\Payload\Request\WmWindowsCreatePayload;
 use Semitexa\Platform\Wm\Application\Service\WmEventBus;
 use Semitexa\Platform\Wm\Application\Service\WmStateService;
 
-#[AsPayloadHandler(payload: WmWindowsCreatePayload::class, resource: \Semitexa\Core\Http\Response\GenericResponse::class)]
-final class WmWindowsCreateHandler implements HandlerInterface
+#[AsPayloadHandler(payload: WmWindowsCreatePayload::class, resource: GenericResponse::class)]
+final class WmWindowsCreateHandler implements TypedHandlerInterface
 {
     #[InjectAsReadonly]
     protected SessionInterface $session;
 
-    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
+    public function handle(WmWindowsCreatePayload $payload, GenericResponse $resource): GenericResponse
     {
-        if (!$payload instanceof WmWindowsCreatePayload || trim($payload->appId) === '') {
-            return Response::json(['error' => 'appId required'], 400);
+        if (trim($payload->appId) === '') {
+            throw new ValidationException(['appId' => ['appId is required']]);
         }
+
         $wmState = WmStateService::fromSession($this->session);
         $window = $wmState->addWindow($payload->appId, $payload->context, $payload->parentWindowId);
         WmEventBus::windowOpen($this->session->getId(), $window);
@@ -41,6 +41,7 @@ final class WmWindowsCreateHandler implements HandlerInterface
             WmEventBus::windowGroup($this->session->getId(), $window['groupId'], $groupWindowIds);
         }
 
-        return Response::json(['window' => $window]);
+        $resource->setContext(['window' => $window]);
+        return $resource;
     }
 }

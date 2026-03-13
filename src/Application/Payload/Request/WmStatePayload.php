@@ -6,11 +6,10 @@ namespace Semitexa\Platform\Wm\Application\Payload\Request;
 
 use Semitexa\Core\Attributes\AsPayload;
 use Semitexa\Core\Attributes\RequiresAuth;
-use Semitexa\Core\Contract\PayloadInterface;
 use Semitexa\Core\Http\Response\GenericResponse;
 
 #[AsPayload(path: '/api/platform/wm/state', methods: ['GET'], responseWith: GenericResponse::class)]
 #[RequiresAuth]
-class WmStatePayload implements PayloadInterface
+class WmStatePayload
 {
 }

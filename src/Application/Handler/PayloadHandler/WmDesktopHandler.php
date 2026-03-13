@@ -7,10 +7,7 @@ namespace Semitexa\Platform\Wm\Application\Handler\PayloadHandler;
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Attributes\InjectAsReadonly;
 use Semitexa\Core\Auth\AuthContextInterface;
-use Semitexa\Core\Contract\HandlerInterface;
-use Semitexa\Core\Contract\PayloadInterface;
-use Semitexa\Core\Contract\ResourceInterface;
-use Semitexa\Core\Response;
+use Semitexa\Core\Contract\TypedHandlerInterface;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Platform\Wm\Application\Payload\Request\WmDesktopPayload;
 use Semitexa\Platform\Wm\Application\Resource\WmDesktopResource;
@@ -18,7 +15,7 @@ use Semitexa\Platform\Wm\Application\Registry\WmAppRegistry;
 use Semitexa\Platform\Wm\Application\Service\WmStateService;
 
 #[AsPayloadHandler(payload: WmDesktopPayload::class, resource: WmDesktopResource::class)]
-final class WmDesktopHandler implements HandlerInterface
+final class WmDesktopHandler implements TypedHandlerInterface
 {
     #[InjectAsReadonly]
     protected SessionInterface $session;
@@ -26,13 +23,10 @@ final class WmDesktopHandler implements HandlerInterface
     #[InjectAsReadonly]
     protected AuthContextInterface $auth;
 
-    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
+    public function handle(WmDesktopPayload $payload, WmDesktopResource $resource): WmDesktopResource
     {
         if ($this->auth->isGuest()) {
-            return Response::redirect('/platform/login');
-        }
-
-        if (!$resource instanceof WmDesktopResource) {
+            $resource->setRedirect('/platform/login');
             return $resource;
         }
 

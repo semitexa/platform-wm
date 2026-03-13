@@ -6,39 +6,57 @@ namespace Semitexa\Platform\Wm\Application\Handler\PayloadHandler;
 
 use Semitexa\Core\Attributes\AsPayloadHandler;
 use Semitexa\Core\Attributes\InjectAsReadonly;
-use Semitexa\Core\Contract\HandlerInterface;
-use Semitexa\Core\Contract\PayloadInterface;
-use Semitexa\Core\Contract\ResourceInterface;
-use Semitexa\Core\Response;
+use Semitexa\Core\Contract\TypedHandlerInterface;
+use Semitexa\Core\Exception\NotFoundException;
+use Semitexa\Core\Exception\ValidationException;
+use Semitexa\Core\Http\Response\GenericResponse;
 use Semitexa\Core\Session\SessionInterface;
 use Semitexa\Platform\Wm\Application\Payload\Request\WmWindowUngroupPayload;
 use Semitexa\Platform\Wm\Application\Service\WmEventBus;
 use Semitexa\Platform\Wm\Application\Service\WmStateService;
 
-#[AsPayloadHandler(payload: WmWindowUngroupPayload::class, resource: \Semitexa\Core\Http\Response\GenericResponse::class)]
-final class WmWindowUngroupHandler implements HandlerInterface
+#[AsPayloadHandler(payload: WmWindowUngroupPayload::class, resource: GenericResponse::class)]
+final class WmWindowUngroupHandler implements TypedHandlerInterface
 {
     #[InjectAsReadonly]
     protected SessionInterface $session;
 
-    public function handle(PayloadInterface $payload, ResourceInterface $resource): ResourceInterface
+    public function handle(WmWindowUngroupPayload $payload, GenericResponse $resource): GenericResponse
     {
-        if (!$payload instanceof WmWindowUngroupPayload || trim($payload->id) === '') {
-            return Response::json(['error' => 'id required'], 400);
+        if (trim($payload->id) === '') {
+            throw new ValidationException(['id' => ['id is required']]);
         }
 
         $wmState = WmStateService::fromSession($this->session);
         $window = $wmState->getWindow($payload->id);
 
         if ($window === null) {
-            return Response::json(['error' => 'Window not found'], 404);
+            throw new NotFoundException('Window', $payload->id);
         }
 
         $oldGroupId = $window['groupId'] ?? null;
         $ungrouped = $wmState->ungroupWindow($payload->id);
 
-        WmEventBus::windowUngroup($this->session->getId(), $payload->id, $oldGroupId);
+        // Determine whether the group was actually dissolved after ungrouping.
+        // ungroupWindow() clears groupId on all remaining members when fewer than 2 are left,
+        // so the group is dissolved when no window still carries $oldGroupId.
+        $dissolvedGroupId = null;
+        if ($oldGroupId !== null) {
+            $stillGrouped = false;
+            foreach ($wmState->getWindows() as $w) {
+                if (($w['groupId'] ?? null) === $oldGroupId) {
+                    $stillGrouped = true;
+                    break;
+                }
+            }
+            if (!$stillGrouped) {
+                $dissolvedGroupId = $oldGroupId;
+            }
+        }
 
-        return Response::json(['window' => $ungrouped]);
+        WmEventBus::windowUngroup($this->session->getId(), $payload->id, $dissolvedGroupId);
+
+        $resource->setContext(['window' => $ungrouped]);
+        return $resource;
     }
 }
