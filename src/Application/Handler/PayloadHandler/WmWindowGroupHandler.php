@@ -23,23 +23,25 @@ final class WmWindowGroupHandler implements TypedHandlerInterface
 
     public function handle(WmWindowGroupPayload $payload, GenericResponse $resource): GenericResponse
     {
-        if (count($payload->windowIds) < 2) {
+        $windowIds = array_values(array_unique($payload->windowIds));
+
+        if (count($windowIds) < 2) {
             throw new ValidationException(['windowIds' => ['At least 2 windowIds required']]);
         }
 
         $wmState = WmStateService::fromSession($this->session);
 
         // Validate all windows exist
-        foreach ($payload->windowIds as $windowId) {
+        foreach ($windowIds as $windowId) {
             if ($wmState->getWindow($windowId) === null) {
                 throw new NotFoundException('Window', $windowId);
             }
         }
 
-        $groupId = $wmState->groupWindows($payload->windowIds);
-        WmEventBus::windowGroup($this->session->getId(), $groupId, $payload->windowIds);
+        $groupId = $wmState->groupWindows($windowIds);
+        WmEventBus::windowGroup($this->session->getId(), $groupId, $windowIds);
 
-        $resource->setContext(['groupId' => $groupId, 'windowIds' => $payload->windowIds]);
+        $resource->setContext(['groupId' => $groupId, 'windowIds' => $windowIds]);
         return $resource;
     }
 }

@@ -37,7 +37,24 @@ final class WmWindowUngroupHandler implements TypedHandlerInterface
         $oldGroupId = $window['groupId'] ?? null;
         $ungrouped = $wmState->ungroupWindow($payload->id);
 
-        WmEventBus::windowUngroup($this->session->getId(), $payload->id, $oldGroupId);
+        // Determine whether the group was actually dissolved after ungrouping.
+        // ungroupWindow() clears groupId on all remaining members when fewer than 2 are left,
+        // so the group is dissolved when no window still carries $oldGroupId.
+        $dissolvedGroupId = null;
+        if ($oldGroupId !== null) {
+            $stillGrouped = false;
+            foreach ($wmState->getWindows() as $w) {
+                if (($w['groupId'] ?? null) === $oldGroupId) {
+                    $stillGrouped = true;
+                    break;
+                }
+            }
+            if (!$stillGrouped) {
+                $dissolvedGroupId = $oldGroupId;
+            }
+        }
+
+        WmEventBus::windowUngroup($this->session->getId(), $payload->id, $dissolvedGroupId);
 
         $resource->setContext(['window' => $ungrouped]);
         return $resource;
