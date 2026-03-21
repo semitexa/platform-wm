@@ -6,7 +6,9 @@ namespace Semitexa\Platform\Wm\Application\Payload\Request;
 
 use Semitexa\Core\Attributes\AsPayload;
 use Semitexa\Platform\Wm\Application\Resource\WmDesktopResource;
+use Semitexa\Authorization\Attributes\PublicEndpoint;
 
+#[PublicEndpoint]
 #[AsPayload(path: '/platform', methods: ['GET'], responseWith: WmDesktopResource::class)]
 class WmDesktopPayload
 {
