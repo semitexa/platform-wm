@@ -3,7 +3,7 @@
     "module": "platform-wm",
     "include": {
         "css": ["css/**/*.css"],
-        "js": ["js/**/*.js"]
+        "js": ["js/wm-*.js"]
     },
     "overrides": {
         "js/wm-sdk.js": {
