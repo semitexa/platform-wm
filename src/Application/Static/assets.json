@@ -1,0 +1,55 @@
+{
+    "$schema": "semitexa://asset-manifest/v2",
+    "module": "platform-wm",
+    "include": {
+        "css": ["css/**/*.css"],
+        "js": ["js/wm-*.js"]
+    },
+    "overrides": {
+        "js/wm-sdk.js": {
+            "priority": 50
+        },
+        "js/wm-shell.js": {
+            "priority": 60,
+            "dependencies": ["platform-wm:js:wm-sdk"]
+        },
+        "js/wm-app.js": {
+            "priority": 70,
+            "attributes": { "type": "module" }
+        }
+    },
+    "extras": [
+        {
+            "key": "platform-wm:preload:wm-app",
+            "type": "preload",
+            "path": "js/wm-app.js",
+            "scope": "page",
+            "position": "head",
+            "priority": 40
+        },
+        {
+            "key": "platform-wm:preload:api-client",
+            "type": "preload",
+            "path": "js/modules/api-client.js",
+            "scope": "page",
+            "position": "head",
+            "priority": 41
+        },
+        {
+            "key": "platform-wm:preload:window-frame",
+            "type": "preload",
+            "path": "js/modules/window-frame.js",
+            "scope": "page",
+            "position": "head",
+            "priority": 42
+        },
+        {
+            "key": "platform-wm:preload:stack-manager",
+            "type": "preload",
+            "path": "js/modules/stack-manager.js",
+            "scope": "page",
+            "position": "head",
+            "priority": 43
+        }
+    ]
+}
