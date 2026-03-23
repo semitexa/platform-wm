@@ -30,9 +30,9 @@
     "keywords": [
         "semitexa",
         "platform",
-        "wm",
-        "mysql",
-        "schema",
-        "attributes"
+        "window-manager",
+        "desktop",
+        "app-registry",
+        "sse"
     ]
 }
