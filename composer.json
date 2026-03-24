@@ -1,6 +1,6 @@
 {
     "name": "semitexa/platform-wm",
-    "description": "Semitexa Platform Window Manager — desktop shell, iframe isolation, SSE event bus, App Registry",
+    "description": "Semitexa Platform Window Manager \u2014 desktop shell, iframe isolation, SSE event bus, App Registry",
     "type": "semitexa-module",
     "license": "MIT",
     "authors": [
@@ -26,5 +26,13 @@
             "description": "Window Manager: desktop, app registry, window state, SSE events"
         }
     },
-    "version": "0.0.12"
+    "version": "0.0.12",
+    "keywords": [
+        "semitexa",
+        "platform",
+        "window-manager",
+        "desktop",
+        "app-registry",
+        "sse"
+    ]
 }
